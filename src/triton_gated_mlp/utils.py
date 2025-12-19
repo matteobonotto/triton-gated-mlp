@@ -8,20 +8,20 @@ from .const import ROOT_PATH
 
 
 ### triton-dejavu cache data
-def setup_dejavu_cache_dir():
-    path = Path("triton_dejavu_cache")
+# def setup_dejavu_cache_dir():
+#     path = Path("triton_dejavu_cache")
 
-    p = Path(path)
+#     p = Path(path)
 
-    # 1. Create directory if it does not exist
-    p.mkdir(parents=True, exist_ok=True)
+#     # 1. Create directory if it does not exist
+#     p.mkdir(parents=True, exist_ok=True)
 
-    # 2. Ensure permissions: o+rw (add read & write for others)
-    st = p.stat()
-    new_mode = st.st_mode | stat.S_IROTH | stat.S_IWOTH
-    os.chmod(p, new_mode)
+#     # 2. Ensure permissions: o+rw (add read & write for others)
+#     st = p.stat()
+#     new_mode = st.st_mode | stat.S_IROTH | stat.S_IWOTH
+#     os.chmod(p, new_mode)
 
-    os.environ["TRITON_DEJAVU_STORAGE"] = str(ROOT_PATH / path)
+#     os.environ["TRITON_DEJAVU_STORAGE"] = str(ROOT_PATH / path)
 
 
 def copy_weights(model_src: nn.Module, model_tgt: nn.Module) -> None:

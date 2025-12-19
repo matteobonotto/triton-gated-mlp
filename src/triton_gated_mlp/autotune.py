@@ -3,7 +3,7 @@ import torch
 from tqdm import tqdm
 
 from triton_gated_mlp.gated_mlp import FusedGatedMLP
-from triton_gated_mlp.utils import get_device, setup_dejavu_cache_dir
+from triton_gated_mlp.utils import get_device
 
 DTYPE = torch.float16
 DEVICE = get_device()
@@ -26,7 +26,7 @@ def step(mlp, x):
 
 
 if __name__ == "__main__":
-    setup_dejavu_cache_dir()
+    # setup_dejavu_cache_dir()
     Ms = [int(2**i) for i in np.arange(5, 13, 1)]
 
     ### Run autotune using triton-dejavu

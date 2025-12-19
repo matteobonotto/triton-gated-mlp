@@ -28,7 +28,7 @@ if __name__ == "__main__":
         triton.testing.Benchmark(
             x_names=["N", "M", "K"],  # Argument names to use as an x-axis for the plot
             x_vals=[
-                int(2**i) for i in np.arange(5, 8, 1)
+                int(2**i) for i in np.arange(5, 13, 1)
             ],  # Different possible values for `x_name`
             line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
             # Possible values for `line_arg`
@@ -69,8 +69,8 @@ if __name__ == "__main__":
     @triton.testing.perf_report(configs)
     def benchmark(M, N, K, provider):
 
-        M *= 4
-        K *= 2
+        # M *= 4
+        # K *= 2
 
         gmlp = get_mlp(provider, N, K, DEVICE, DTYPE)
 
@@ -96,8 +96,8 @@ if __name__ == "__main__":
     @triton.testing.perf_report(configs)
     def benchmark(M, N, K, provider):
 
-        M *= 4
-        K *= 2
+        # M *= 4
+        # K *= 2
 
         gmlp = get_mlp(provider, N, K, DEVICE, DTYPE)
 

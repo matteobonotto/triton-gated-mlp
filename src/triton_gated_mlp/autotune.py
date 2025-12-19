@@ -27,7 +27,7 @@ def step(mlp, x):
 
 if __name__ == "__main__":
     setup_dejavu_cache_dir()
-    Ms = [int(2**i) for i in np.arange(5, 8, 1)]
+    Ms = [int(2**i) for i in np.arange(5, 13, 1)]
 
     ### Run autotune using triton-dejavu
     for M in tqdm(Ms, total=len(Ms)):
@@ -43,11 +43,11 @@ if __name__ == "__main__":
 
     ### Run autotune using triton-dejavu
     for M in tqdm(Ms, total=len(Ms)):
+        print(" *** Autotuning for M = 4*N = 2*K ***")
+
+        N = K = M
         M *= 4
         K *= 2
-
-        print(" *** Autotuning for M = 4*N = 2*K ***")
-        N = K = M
         gmlp = get_gated_mlp(N=N, K=K)
 
         print(f"Tuning for: {DTYPE=}, {M=}, {N=}, {K=}")

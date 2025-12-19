@@ -1,0 +1,8 @@
+{
+    "name": "Triton Dev (CPU)",
+    "image": "ubuntu:22.04",
+    "platform": "linux/amd64",
+    "runArgs": ["--shm-size=1g"],
+    "postCreateCommand": "apt update && apt install -y python3.10 python3.10-venv python3-pip git build-essential && python3.10 -m venv /opt/venv && . /opt/venv/bin/activate && pip install --upgrade pip triton",
+    "remoteUser": "root"
+  }

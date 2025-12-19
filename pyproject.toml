@@ -1,0 +1,26 @@
+[project]
+name = "triton-gated-mlp"
+version = "0.0.1"
+description = "Triton implementation of gated-mlp module."
+authors = [{name = 'Matteo Bonotto', email = "m.bonotto@outlook.com"}]
+
+[build-system]
+requires = ["poetry-core>=1.0.0,<2.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.dependencies]
+python = ">=3.11, <3.15"
+numpy = "*"
+black = "*"
+mypy = "*"
+pytest = "*"
+triton = "3.5.0"
+torch = "~2.9.0"
+matplotlib = "~3.10.7"
+pandas = '~2.3.3'
+psutil = "~7.1.3"
+ipykernel = "~7.1.0"
+tqdm = "~4.67.1"
+smac = "~2.3.1"
+triton-dejavu = { git = "https://github.com/IBM/triton-dejavu.git"}
+ConfigSpace = "~1.2.1"

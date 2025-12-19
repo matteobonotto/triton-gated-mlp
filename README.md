@@ -1,6 +1,6 @@
 # triton-gated-mlp
 
-Triton implementation of the gated-mlp module. We use `triton-dejavu` for better caching of the autotuning configs, so you don't need to run the autotune each time.
+Triton implementation of the gated-mlp module. We use `triton-dejavu` (see [here](https://github.com/IBM/triton-dejavu)) for better caching of the autotuning configs, so you don't need to run the autotune each time.
 
 
 ## Installation

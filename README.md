@@ -5,8 +5,10 @@ Triton implementation of the gated-mlp module. We use `triton-dejavu` for better
 
 ## Installation
 Just do the following steps:
+1. clone the repo and `cd triton-gated-mlp`
 1. `make install` to set-up all the stuff and create the vistualenv
 2. `make setup-triton-dejavu` this step is required to properly set-up `triton-dejavu`, providing a folder with proper permissions to cache the optimal parameters found by the autotuner.
+3. `make install` to install all the project dependencies and the package
 
 ## Autotuning
 It is strongly suggested to run, as first thing after the installation, the command

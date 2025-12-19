@@ -10,6 +10,7 @@ import triton_dejavu
 from .utils import get_num_streaming_multiprocessors, map_pid_m_n
 from .act import _act_bwd, _act_fwd
 
+
 def launch_metadata(grid, kernel, args):
     ret = {}
     M, N, K, WS = args["M"], args["N"], args["K"], args.get("WARP_SPECIALIZE", False)
@@ -19,7 +20,7 @@ def launch_metadata(grid, kernel, args):
         bytes_per_elem = args["c_ptr"].element_size()
     else:
         bytes_per_elem = 1 if args["FP8_OUTPUT"] else 2
-    ret[f"flops{bytes_per_elem * 8}"] = 2. * M * N * K
+    ret[f"flops{bytes_per_elem * 8}"] = 2.0 * M * N * K
     ret["bytes"] = bytes_per_elem * (M * K + N * K + M * N)
     return ret
 
@@ -28,7 +29,7 @@ def launch_metadata(grid, kernel, args):
 #     return [
 #         triton.Config(
 #             {
-#                 'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS, 
+#                 'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS,
 #             }, pre_hook=pre_hook)  #
 #         for BM in [16, 32, 64, 128]  #
 #         for BN in [16, 32, 64, 128]  #
@@ -39,12 +40,18 @@ def launch_metadata(grid, kernel, args):
 #         # for SUBTILE in [True, False]  #
 #     ]
 
+
 def get_autotune_configs(pre_hook=None):
     return [
         triton.Config(
             {
-                'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS, 
-            }, pre_hook=pre_hook)  #
+                "BLOCK_SIZE_M": BM,
+                "BLOCK_SIZE_N": BN,
+                "BLOCK_SIZE_K": BK,
+                "GROUP_SIZE_M": GS,
+            },
+            pre_hook=pre_hook,
+        )  #
         for BM in [32, 64, 128, 256]  #
         for BN in [32, 64, 128, 256]  #
         for BK in [32, 64, 128, 256]  #
@@ -54,19 +61,26 @@ def get_autotune_configs(pre_hook=None):
         # for SUBTILE in [True, False]  #
     ]
 
+
 def get_autotune_config_space():
     BM = [16, 32, 64, 128]  #
     BN = [16, 32, 64, 128]  #
     BK = [16, 32, 64, 128]  #
     GS = [2, 4, 8, 16]
     return triton_dejavu.ConfigSpace(
-        {'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS},
+        {
+            "BLOCK_SIZE_M": BM,
+            "BLOCK_SIZE_N": BN,
+            "BLOCK_SIZE_K": BK,
+            "GROUP_SIZE_M": GS,
+        },
         # num_warps=[4, 8, 16],
         # num_stages=[1, 2, 4, 6],
     )
 
+
 @triton_dejavu.autotune(
-    # configs=get_autotune_configs(), 
+    # configs=get_autotune_configs(),
     config_space=get_autotune_config_space(),
     key=["M", "N", "K"],
     use_bo=True,
@@ -197,27 +211,31 @@ def _compute_quantities_for_bwd(
         grad_output_c_desc.store(offsets=offsets, value=tile_grad_output_c)
 
 
-
 def get_autotune_config_space():
     BM = [32, 64, 128]  #
     BN = [32, 64, 128]  #
     BK = [32, 64, 128]  #
     GS = [4, 8, 16]
     return triton_dejavu.ConfigSpace(
-        {'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS},
+        {
+            "BLOCK_SIZE_M": BM,
+            "BLOCK_SIZE_N": BN,
+            "BLOCK_SIZE_K": BK,
+            "GROUP_SIZE_M": GS,
+        },
         # num_warps=[4, 8, 16],
         # num_stages=[1, 2, 4, 6],
     )
 
+
 @triton_dejavu.autotune(
-    # configs=get_autotune_configs(), 
+    # configs=get_autotune_configs(),
     config_space=get_autotune_config_space(),
     key=["M", "N", "K"],
     use_bo=True,
 )
-
 @triton_dejavu.autotune(
-    configs=get_autotune_configs(), 
+    configs=get_autotune_configs(),
     key=["M", "N", "K"],
 )
 @triton.jit(launch_metadata=launch_metadata)
@@ -238,7 +256,7 @@ def _compute_dx(
 ):
     """
     Triton kernel computing:
-        
+
         dx_1 = grad_output_c @ W_up
         dx_2 = grad_output_a_act_prime @ W_gp
         dx = dx_1 + dx_2
@@ -261,7 +279,10 @@ def _compute_dx(
         W_up_ptr, shape=[N, K], strides=[K, 1], block_shape=[BLOCK_SIZE_N, BLOCK_SIZE_K]
     )
     grad_output_a_act_prime_desc = tl.make_tensor_descriptor(
-        grad_output_a_act_prime_ptr, shape=[M, N], strides=[N, 1], block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_N]
+        grad_output_a_act_prime_ptr,
+        shape=[M, N],
+        strides=[N, 1],
+        block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_N],
     )
     W_gp_desc = tl.make_tensor_descriptor(
         W_gp_ptr, shape=[N, K], strides=[K, 1], block_shape=[BLOCK_SIZE_N, BLOCK_SIZE_K]
@@ -305,7 +326,7 @@ def _compute_dx(
 #     return [
 #         triton.Config(
 #             {
-#                 'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS, 
+#                 'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS,
 #             }, pre_hook=pre_hook)  #
 #         for BM in [16, 32]  #
 #         for BN in [16, 32]  #
@@ -321,8 +342,13 @@ def get_autotune_configs(pre_hook=None):
     return [
         triton.Config(
             {
-                'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS, 
-            }, pre_hook=pre_hook)  #
+                "BLOCK_SIZE_M": BM,
+                "BLOCK_SIZE_N": BN,
+                "BLOCK_SIZE_K": BK,
+                "GROUP_SIZE_M": GS,
+            },
+            pre_hook=pre_hook,
+        )  #
         for BM in [16, 32, 64]  #
         for BN in [16, 32, 64]  #
         for BK in [32, 64, 128, 256]  #
@@ -332,35 +358,45 @@ def get_autotune_configs(pre_hook=None):
         # for SUBTILE in [True, False]  #
     ]
 
+
 def get_autotune_config_space():
     BM = [8, 16, 32]  #
     BN = [16, 32, 64, 128]  #
     BK = [32, 64, 128, 256]  #
     GS = [2, 4, 8]
     return triton_dejavu.ConfigSpace(
-        {'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS},
+        {
+            "BLOCK_SIZE_M": BM,
+            "BLOCK_SIZE_N": BN,
+            "BLOCK_SIZE_K": BK,
+            "GROUP_SIZE_M": GS,
+        },
         # num_warps=[4, 8, 16],
         # num_stages=[1, 2, 4, 6],
     )
 
 
 @triton_dejavu.autotune(
-    # configs=get_autotune_configs(), 
+    # configs=get_autotune_configs(),
     config_space=get_autotune_config_space(),
     key=["M", "N", "K"],
     use_bo=True,
 )
 @triton.jit(launch_metadata=launch_metadata)
 def _compute_dW_up_dW_gp(
-        x_ptr, grad_output_c_ptr, grad_output_a_act_prime_ptr, dW_up_ptr, dW_gp_ptr,
-        M,
-        N,
-        K,
-        NUM_SMS : tl.constexpr,
-        BLOCK_SIZE_M : tl.constexpr,
-        BLOCK_SIZE_K : tl.constexpr,
-        BLOCK_SIZE_N : tl.constexpr,
-        GROUP_SIZE_M : tl.constexpr,
+    x_ptr,
+    grad_output_c_ptr,
+    grad_output_a_act_prime_ptr,
+    dW_up_ptr,
+    dW_gp_ptr,
+    M,
+    N,
+    K,
+    NUM_SMS: tl.constexpr,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_K: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
     num_programs_n = tl.cdiv(N, BLOCK_SIZE_N)
@@ -372,18 +408,30 @@ def _compute_dW_up_dW_gp(
         x_ptr, shape=[M, K], strides=[K, 1], block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_K]
     )
     grad_output_c_desc = tl.make_tensor_descriptor(
-        grad_output_c_ptr, shape=[M, N], strides=[N, 1], block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_N]
+        grad_output_c_ptr,
+        shape=[M, N],
+        strides=[N, 1],
+        block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_N],
     )
     grad_output_a_act_prime_desc = tl.make_tensor_descriptor(
-        grad_output_a_act_prime_ptr, shape=[M, N], strides=[N, 1], block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_N]
+        grad_output_a_act_prime_ptr,
+        shape=[M, N],
+        strides=[N, 1],
+        block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_N],
     )
 
     ### make tensor descriptors outputs
     dW_up_desc = tl.make_tensor_descriptor(
-        dW_up_ptr, shape=[N, K], strides=[K, 1], block_shape=[BLOCK_SIZE_N, BLOCK_SIZE_K]
+        dW_up_ptr,
+        shape=[N, K],
+        strides=[K, 1],
+        block_shape=[BLOCK_SIZE_N, BLOCK_SIZE_K],
     )
     dW_gp_desc = tl.make_tensor_descriptor(
-        dW_gp_ptr, shape=[N, K], strides=[K, 1], block_shape=[BLOCK_SIZE_N, BLOCK_SIZE_K]
+        dW_gp_ptr,
+        shape=[N, K],
+        strides=[K, 1],
+        block_shape=[BLOCK_SIZE_N, BLOCK_SIZE_K],
     )
 
     ### persistent loop
@@ -403,7 +451,9 @@ def _compute_dW_up_dW_gp(
         for offset_m in tl.range(0, BLOCK_SIZE_M, M):
 
             tile_grad_output_c = grad_output_c_desc.load([offset_m, offset_n])
-            tile_grad_output_a_act_prime = grad_output_a_act_prime_desc.load([offset_m, offset_n])
+            tile_grad_output_a_act_prime = grad_output_a_act_prime_desc.load(
+                [offset_m, offset_n]
+            )
             tile_x = x_desc.load([offset_m, offset_k])
 
             tile_dW_up = tl.dot(tile_grad_output_c.T, tile_x, acc=tile_dW_up)
@@ -439,7 +489,12 @@ def mlp_hidden_states_bwd(
     triton.set_allocator(allocation_fn)
 
     # grid = (min(NUM_SMS, math.ceil(M / BLOCK_SIZE_M) * math.ceil(N / BLOCK_SIZE_N)),)
-    grid = lambda META: (min(NUM_SMS, triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"])), )
+    grid = lambda META: (
+        min(
+            NUM_SMS,
+            triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
+        ),
+    )
     ### compute quantities for bwd
     _compute_quantities_for_bwd[grid](
         x,
@@ -496,7 +551,12 @@ def mlp_hidden_states_bwd(
     dW_gp = torch.zeros(W_gp.shape, **kwargs)  # check dtype
 
     # grid = (min(NUM_SMS, math.ceil(M / BLOCK_SIZE_M) * math.ceil(K / BLOCK_SIZE_K)),)
-    grid = lambda META: (min(NUM_SMS, triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(K, META["BLOCK_SIZE_K"])), )
+    grid = lambda META: (
+        min(
+            NUM_SMS,
+            triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(K, META["BLOCK_SIZE_K"]),
+        ),
+    )
     _compute_dx[grid](
         grad_output_c,
         W_up,
@@ -513,10 +573,19 @@ def mlp_hidden_states_bwd(
         # GROUP_SIZE_M,
     )
 
-    grid = lambda META: (min(NUM_SMS, triton.cdiv(K, META["BLOCK_SIZE_K"]) * triton.cdiv(N, META["BLOCK_SIZE_N"])), )
+    grid = lambda META: (
+        min(
+            NUM_SMS,
+            triton.cdiv(K, META["BLOCK_SIZE_K"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
+        ),
+    )
     # grid = (min(NUM_SMS, math.ceil(K / BLOCK_SIZE_K) * math.ceil(N / BLOCK_SIZE_N)),)
     _compute_dW_up_dW_gp[grid](
-        x, grad_output_c, grad_output_a_act_prime, dW_up, dW_gp,
+        x,
+        grad_output_c,
+        grad_output_a_act_prime,
+        dW_up,
+        dW_gp,
         M,
         N,
         K,

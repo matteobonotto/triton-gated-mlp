@@ -1,10 +1,10 @@
-from triton_kernels.nn.gated_mlp.gated_mlp import (
-    NaiveGatedMLP,
+from triton_gated_mlp.gated_mlp import (
+    EagerGatedMLP,
     FusedGatedMLP,
-    eager_forward,
     mlp_hidden_states_fwd,
+    eager_fwd,
 )
-from triton_kernels.utils import get_device
+from triton_gated_mlp.utils import get_device
 
 import triton
 from torch import nn
@@ -25,7 +25,7 @@ def test_gated_mlp_fwd():
     DEVICE = get_device()
     DTYPE = torch.float32
 
-    gmlp_1 = NaiveGatedMLP(dropout_p=0.0).to(DEVICE).to(DTYPE)
+    gmlp_1 = EagerGatedMLP(dropout_p=0.0).to(DEVICE).to(DTYPE)
     gmlp_2 = FusedGatedMLP(dropout_p=0.0).to(DEVICE).to(DTYPE)
 
     copy_weights(gmlp_1, gmlp_2)
@@ -49,20 +49,20 @@ def test_fwd_op_triton():
         "bias": False,
     }
 
-    gmlp = NaiveGatedMLP(**init_args).to(DEVICE).to(DTYPE)
+    gmlp = EagerGatedMLP(**init_args).to(DEVICE).to(DTYPE)
 
     M = 128
     K = gmlp.hidden_size
 
     x = torch.rand((M, K), device=DEVICE, dtype=DTYPE)
-    out_ref = eager_forward(
+    out_ref = eager_fwd(
         x,
         gmlp.up_proj.weight,
         gmlp.up_proj.bias,
         gmlp.gate_proj.weight,
         gmlp.gate_proj.bias,
-        gmlp.act_fn,
-        gmlp.dropout.p,
+        # gmlp.act_fn,
+        # gmlp.dropout.p,
     )
     print(out_ref)
 

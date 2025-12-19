@@ -1,12 +1,12 @@
-from triton_kernels.nn.gated_mlp.gated_mlp import (
-    NaiveGatedMLP,
+from triton_gated_mlp.gated_mlp import (
+    EagerGatedMLP,
     FusedGatedMLP,
     eager_fwd,
     mlp_hidden_states_fwd,
     mlp_hidden_states_bwd,
     ACT_FWD,
 )
-from triton_kernels.utils import get_device
+from triton_gated_mlp.utils import get_device
 
 from torch.autograd import grad
 import triton
@@ -29,7 +29,7 @@ def test_gated_mlp_bwd():
     DEVICE = get_device()
     DTYPE = torch.float32
 
-    gmlp_1 = NaiveGatedMLP(dropout_p=0.0, bias=False).to(DEVICE).to(DTYPE)
+    gmlp_1 = EagerGatedMLP(dropout_p=0.0, bias=False).to(DEVICE).to(DTYPE)
     gmlp_2 = FusedGatedMLP(dropout_p=0.0, bias=False).to(DEVICE).to(DTYPE)
 
     copy_weights(gmlp_1, gmlp_2)
@@ -78,9 +78,6 @@ def test_gated_mlp_bwd():
     print("Done!!")
 
     triton.testing.assert_close(gmlp_1(x), gmlp_2(x), rtol=1e-6)
-
-
-test_gated_mlp_bwd()
 
 
 def assert_close(x: Tensor, x_ref: Tensor, atol: float):

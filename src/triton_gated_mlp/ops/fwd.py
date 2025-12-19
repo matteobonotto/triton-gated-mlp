@@ -19,16 +19,22 @@ def launch_metadata(grid, kernel, args):
         bytes_per_elem = args["c_ptr"].element_size()
     else:
         bytes_per_elem = 1 if args["FP8_OUTPUT"] else 2
-    ret[f"flops{bytes_per_elem * 8}"] = 2. * M * N * K
+    ret[f"flops{bytes_per_elem * 8}"] = 2.0 * M * N * K
     ret["bytes"] = bytes_per_elem * (M * K + N * K + M * N)
     return ret
+
 
 def get_autotune_configs(pre_hook=None):
     return [
         triton.Config(
             {
-                'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS
-            }, pre_hook=pre_hook)  #
+                "BLOCK_SIZE_M": BM,
+                "BLOCK_SIZE_N": BN,
+                "BLOCK_SIZE_K": BK,
+                "GROUP_SIZE_M": GS,
+            },
+            pre_hook=pre_hook,
+        )  #
         for BM in [32, 64, 128, 256]  #
         for BN in [32, 64, 128, 256]  #
         for BK in [32, 64, 128, 256]  #
@@ -45,14 +51,19 @@ def get_autotune_config_space():
     BK = [16, 32, 64, 128]  #
     GS = [2, 4, 8, 16]
     return triton_dejavu.ConfigSpace(
-        {'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS},
+        {
+            "BLOCK_SIZE_M": BM,
+            "BLOCK_SIZE_N": BN,
+            "BLOCK_SIZE_K": BK,
+            "GROUP_SIZE_M": GS,
+        },
         # num_warps=[4, 8, 16],
         # num_stages=[1, 2, 4, 6],
     )
 
 
 @triton_dejavu.autotune(
-    # configs=get_autotune_configs(), 
+    # configs=get_autotune_configs(),
     config_space=get_autotune_config_space(),
     key=["M", "N", "K"],
     use_bo=True,
@@ -224,7 +235,12 @@ def mlp_hidden_states_fwd(
     NUM_SMS = get_num_streaming_multiprocessors()
     # BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, GROUP_SIZE_M = (64, 64, 32, 2)
     # grid = (min(NUM_SMS, math.ceil(N / BLOCK_SIZE_M) * math.ceil(N / BLOCK_SIZE_N)),)
-    grid = lambda META: (min(NUM_SMS, triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"])), )
+    grid = lambda META: (
+        min(
+            NUM_SMS,
+            triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
+        ),
+    )
 
     ### custom allocation function
     def allocator(size, stream: int, allignment: Optional[int]):

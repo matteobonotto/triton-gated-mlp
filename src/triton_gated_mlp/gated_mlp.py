@@ -70,7 +70,7 @@ ACT_BWD = {
 #         return mlp_fwd(x, self.W1.weight, self.W2.weight, self.W3.weight)
 
 
-class NaiveGatedMLP(nn.Module):
+class EagerGatedMLP(nn.Module):
     def __init__(
         self,
         hidden_size: int = 256,

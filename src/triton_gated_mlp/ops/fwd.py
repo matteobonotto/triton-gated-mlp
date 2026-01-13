@@ -253,26 +253,27 @@ def mlp_hidden_states_fwd(
 
     has_b_gp = b_gp is not None
     has_b_up = b_up is not None
-    _fwd_kernel[grid](
-        x,
-        WT_up,
-        # b_up,
-        # has_b_up,
-        WT_gp,
-        # b_gp,
-        # has_b_gp,
-        out,
-        act_fn,
-        dropout_p,
-        M,
-        N,
-        K,
-        NUM_SMS,
-        # BLOCK_SIZE_M,
-        # BLOCK_SIZE_N,
-        # BLOCK_SIZE_K,
-        # GROUP_SIZE_M,
-    )
+    with torch.cuda.device(x.device.index):
+        _fwd_kernel[grid](
+            x,
+            WT_up,
+            # b_up,
+            # has_b_up,
+            WT_gp,
+            # b_gp,
+            # has_b_gp,
+            out,
+            act_fn,
+            dropout_p,
+            M,
+            N,
+            K,
+            NUM_SMS,
+            # BLOCK_SIZE_M,
+            # BLOCK_SIZE_N,
+            # BLOCK_SIZE_K,
+            # GROUP_SIZE_M,
+        )
 
     ###
     return out.to(x.dtype) if x.dtype != out.dtype else out

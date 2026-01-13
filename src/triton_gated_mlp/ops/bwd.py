@@ -496,24 +496,25 @@ def mlp_hidden_states_bwd(
         ),
     )
     ### compute quantities for bwd
-    _compute_quantities_for_bwd[grid](
-        x,
-        W_up,
-        W_gp,
-        grad_output,
-        act_prime,
-        grad_output_a_act_prime,
-        grad_output_c,
-        act_fun,
-        M,
-        N,
-        K,
-        NUM_SMS,
-        # BLOCK_SIZE_M,
-        # BLOCK_SIZE_N,
-        # BLOCK_SIZE_K,
-        # GROUP_SIZE_M,
-    )
+    with torch.cuda.device(x.device.index):
+        _compute_quantities_for_bwd[grid](
+            x,
+            W_up,
+            W_gp,
+            grad_output,
+            act_prime,
+            grad_output_a_act_prime,
+            grad_output_c,
+            act_fun,
+            M,
+            N,
+            K,
+            NUM_SMS,
+            # BLOCK_SIZE_M,
+            # BLOCK_SIZE_N,
+            # BLOCK_SIZE_K,
+            # GROUP_SIZE_M,
+        )
 
     """
     # steps to check the results
@@ -557,21 +558,22 @@ def mlp_hidden_states_bwd(
             triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(K, META["BLOCK_SIZE_K"]),
         ),
     )
-    _compute_dx[grid](
-        grad_output_c,
-        W_up,
-        grad_output_a_act_prime,
-        W_gp,
-        dx,
-        M,
-        N,
-        K,
-        NUM_SMS,
-        # BLOCK_SIZE_M,
-        # BLOCK_SIZE_K,
-        # BLOCK_SIZE_N,
-        # GROUP_SIZE_M,
-    )
+    with torch.cuda.device(x.device.index):
+        _compute_dx[grid](
+            grad_output_c,
+            W_up,
+            grad_output_a_act_prime,
+            W_gp,
+            dx,
+            M,
+            N,
+            K,
+            NUM_SMS,
+            # BLOCK_SIZE_M,
+            # BLOCK_SIZE_K,
+            # BLOCK_SIZE_N,
+            # GROUP_SIZE_M,
+        )
 
     grid = lambda META: (
         min(
@@ -580,20 +582,21 @@ def mlp_hidden_states_bwd(
         ),
     )
     # grid = (min(NUM_SMS, math.ceil(K / BLOCK_SIZE_K) * math.ceil(N / BLOCK_SIZE_N)),)
-    _compute_dW_up_dW_gp[grid](
-        x,
-        grad_output_c,
-        grad_output_a_act_prime,
-        dW_up,
-        dW_gp,
-        M,
-        N,
-        K,
-        NUM_SMS,
-        # BLOCK_SIZE_M,
-        # BLOCK_SIZE_K,
-        # BLOCK_SIZE_N,
-        # GROUP_SIZE_M,
-    )
+    with torch.cuda.device(x.device.index):
+        _compute_dW_up_dW_gp[grid](
+            x,
+            grad_output_c,
+            grad_output_a_act_prime,
+            dW_up,
+            dW_gp,
+            M,
+            N,
+            K,
+            NUM_SMS,
+            # BLOCK_SIZE_M,
+            # BLOCK_SIZE_K,
+            # BLOCK_SIZE_N,
+            # GROUP_SIZE_M,
+        )
 
     return dx, dW_up, dW_gp

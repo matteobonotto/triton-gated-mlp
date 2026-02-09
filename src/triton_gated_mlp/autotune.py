@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torch import autograd
 from tqdm import tqdm
 
 from triton_gated_mlp.gated_mlp import FusedGatedMLP
@@ -21,9 +22,8 @@ def get_gated_mlp(N, K):
 
 def step(mlp, x):
     out = mlp(x)
-    loss = out.sum()
-    loss.backward()
-
+    params = (x, mlp.gate_proj.weight, mlp.up_proj.weight, mlp.down_proj.weight)
+    grads = autograd.grad(out, params, torch.rand_like(x).to(x.device))
 
 if __name__ == "__main__":
     # setup_dejavu_cache_dir()

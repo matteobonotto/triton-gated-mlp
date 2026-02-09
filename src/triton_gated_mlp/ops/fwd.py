@@ -4,6 +4,20 @@ import triton.language as tl
 import torch
 from torch import Tensor
 import math
+
+from pathlib import Path
+import os
+# if os.environ.get("storage_prefix")
+
+# if "triton_dejavu_cache" in Path()
+
+from ..const import ROOT_PATH
+
+CACHE_DIR = ROOT_PATH / Path("triton_dejavu_cache")
+if not CACHE_DIR.exists():
+    CACHE_DIR.mkdir(exist_ok=True, parents=True, )
+
+
 import triton_dejavu
 
 from .act import _act_fwd, _act_bwd

@@ -2,7 +2,7 @@ import triton
 import torch
 import numpy as np
 import pandas as pd
-from torch import nn, Tensor
+from torch import nn, Tensor, autograd
 
 from triton_gated_mlp.gated_mlp import FusedGatedMLP, EagerGatedMLP
 from triton_gated_mlp.utils import get_device
@@ -46,8 +46,8 @@ if __name__ == "__main__":
 
     def step(mlp, x):
         out = mlp(x)
-        loss = out.sum()
-        loss.backward()
+        params = (x, mlp.gate_proj.weight, mlp.up_proj.weight, mlp.down_proj.weight)
+        grads = autograd.grad(out, params, torch.rand_like(x).to(x.device))
 
     MAP_MODULE = {
         "torch": EagerGatedMLP,

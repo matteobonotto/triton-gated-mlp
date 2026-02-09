@@ -46,3 +46,4 @@ out = gmlp(x)
 ```
 
 ## Benchmarks
+![Alt text](images/benchmark_tflops.png)

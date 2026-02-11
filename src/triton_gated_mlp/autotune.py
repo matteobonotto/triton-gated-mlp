@@ -25,6 +25,7 @@ def step(mlp, x):
     params = (x, mlp.gate_proj.weight, mlp.up_proj.weight, mlp.down_proj.weight)
     grads = autograd.grad(out, params, torch.rand_like(x).to(x.device))
 
+
 if __name__ == "__main__":
     # setup_dejavu_cache_dir()
     Ms = [int(2**i) for i in np.arange(5, 13, 1)]

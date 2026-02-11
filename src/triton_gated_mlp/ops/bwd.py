@@ -79,12 +79,12 @@ def get_autotune_config_space():
     )
 
 
-@triton_dejavu.autotune(
-    # configs=get_autotune_configs(),
-    config_space=get_autotune_config_space(),
-    key=["M", "N", "K"],
-    use_bo=True,
-)
+# @triton_dejavu.autotune(
+#     # configs=get_autotune_configs(),
+#     config_space=get_autotune_config_space(),
+#     key=["M", "N", "K"],
+#     use_bo=True,
+# )
 @triton.jit(launch_metadata=launch_metadata)
 def _compute_quantities_for_bwd(
     x_ptr,
@@ -228,16 +228,10 @@ def get_autotune_config_space():
     )
 
 
-@triton_dejavu.autotune(
-    # configs=get_autotune_configs(),
-    config_space=get_autotune_config_space(),
-    key=["M", "N", "K"],
-    use_bo=True,
-)
-@triton_dejavu.autotune(
-    configs=get_autotune_configs(),
-    key=["M", "N", "K"],
-)
+# @triton_dejavu.autotune(
+#     configs=get_autotune_configs(),
+#     key=["M", "N", "K"],
+# )
 @triton.jit(launch_metadata=launch_metadata)
 def _compute_dx(
     grad_output_c_ptr,
@@ -376,12 +370,12 @@ def get_autotune_config_space():
     )
 
 
-@triton_dejavu.autotune(
-    # configs=get_autotune_configs(),
-    config_space=get_autotune_config_space(),
-    key=["M", "N", "K"],
-    use_bo=True,
-)
+# @triton_dejavu.autotune(
+#     # configs=get_autotune_configs(),
+#     config_space=get_autotune_config_space(),
+#     key=["M", "N", "K"],
+#     use_bo=True,
+# )
 @triton.jit(launch_metadata=launch_metadata)
 def _compute_dW_up_dW_gp(
     x_ptr,

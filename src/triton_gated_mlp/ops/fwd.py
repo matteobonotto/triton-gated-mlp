@@ -7,15 +7,20 @@ import math
 
 from pathlib import Path
 import os
+
 # if os.environ.get("storage_prefix")
 
 # if "triton_dejavu_cache" in Path()
 
+from .utils import validate_dimensions
 from ..const import ROOT_PATH
 
 CACHE_DIR = ROOT_PATH / Path("triton_dejavu_cache")
 if not CACHE_DIR.exists():
-    CACHE_DIR.mkdir(exist_ok=True, parents=True, )
+    CACHE_DIR.mkdir(
+        exist_ok=True,
+        parents=True,
+    )
 
 
 import triton_dejavu
@@ -76,12 +81,12 @@ def get_autotune_config_space():
     )
 
 
-@triton_dejavu.autotune(
-    # configs=get_autotune_configs(),
-    config_space=get_autotune_config_space(),
-    key=["M", "N", "K"],
-    use_bo=True,
-)
+# @triton_dejavu.autotune(
+#     # configs=get_autotune_configs(),
+#     config_space=get_autotune_config_space(),
+#     key=["M", "N", "K"],
+#     use_bo=True,
+# )
 @triton.jit(launch_metadata=launch_metadata)
 def _fwd_kernel(
     x_ptr,
@@ -178,35 +183,6 @@ def _fwd_kernel(
         tile_out = _act_fwd(tile_gp, act_fn) * tile_up
 
         out_desc.store([offset_m, offset_n], tile_out)
-
-
-def validate_dimensions(
-    x: Tensor,
-    WT_up: Tensor,  # this one is transposed
-    b_up: Tensor | None,
-    WT_gp: Tensor,  # this one is transposed
-    b_gp: Tensor | None,
-) -> None:
-    assert x.ndim <= 2, f"input tensor must have ndims <=2, got {x.ndim}"
-    assert WT_up.shape[1] == x.shape[1], "dimension mismatch in WT_up or x"
-    assert WT_gp.shape == WT_up.shape, "dimension mismatch in WT_up or WT_gp"
-
-    if b_up is not None:
-        assert b_up.shape[0] == WT_up.shape[0], "dimension mismatch in b_up"
-
-    if b_gp is not None:
-        assert b_gp.shape[0] == WT_up.shape[0], "dimension mismatch in b_gp"
-
-
-def pad_tensor_16_byte_aligned(t: Tensor, axis: int) -> Tensor:
-    assert t.ndim == 2, f"expected tensor to have exactly 2 dimensions, got {t.ndims}"
-    old_dims = t.shape
-    dim = old_dims[axis]
-    padded_dim = dim + 16 - dim % 16
-    new_dims = (padded_dim, t.shape[1]) if axis == 0 else (t.shape[0], padded_dim)
-    new_t = torch.zeros(new_dims, dtype=t.dtype, device=t.device)
-    new_t[: old_dims[0], : old_dims[1]] = t
-    return new_t
 
 
 def mlp_hidden_states_fwd(

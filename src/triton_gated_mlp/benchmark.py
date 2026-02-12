@@ -46,15 +46,15 @@ if __name__ == "__main__":
 
     def step(mlp, x):
         out = mlp(x)
-        params = (x, mlp.gate_proj.weight, mlp.up_proj.weight, mlp.down_proj.weight)
-        grads = autograd.grad(out, params, torch.rand_like(x).to(x.device))
+        # params = (x, mlp.gate_proj.weight, mlp.up_proj.weight, mlp.down_proj.weight)
+        # grads = autograd.grad(out, params, torch.rand_like(x).to(x.device))
 
     MAP_MODULE = {
         "torch": EagerGatedMLP,
         "triton": FusedGatedMLP,
     }
 
-    DTYPE = torch.float16
+    DTYPE = torch.float32
     DEVICE = get_device()
 
     def get_mlp(provider, N, K, DEVICE, DTYPE):
@@ -83,13 +83,13 @@ if __name__ == "__main__":
         ms, min_ms, max_ms = triton.testing.do_bench(
             lambda: step(gmlp, x), quantiles=quantiles
         )
-        perf = lambda ms: 9 * 2 * M * N * K * 1e-12 / (ms * 1e-3)
+        perf = lambda ms: 3 * 2 * M * N * K * 1e-12 / (ms * 1e-3)
         return perf(ms), perf(max_ms), perf(min_ms)
 
     df_ops: pd.DataFrame = benchmark.run(
         show_plots=True, print_data=True, return_df=True
     )[0]
-    ax = df_ops.plot(x="N", kind="bar", y=["torch", "triton"], ylabel="TFLOPS")
+    ax = df_ops.plot(x="N", kind="bar", y=["torch", "triton"], ylabel="TFLOPS", title=f"TFLOPS - {str(DTYPE).replace('torch.', '')}")
     ax.figure.tight_layout()
     ax.figure.savefig("benchmark_tflops.png")
 
@@ -118,6 +118,6 @@ if __name__ == "__main__":
     df_mem: pd.DataFrame = benchmark.run(
         show_plots=True, print_data=True, return_df=True
     )[0]
-    ax = df_mem.plot(x="N", kind="bar", y=["torch", "triton"], ylabel="TFLOPS")
+    ax = df_mem.plot(x="N", kind="bar", y=["torch", "triton"], ylabel="MB", title=f"Mem. [MB] - {str(DTYPE).replace('torch.', '')}")
     ax.figure.tight_layout()
     ax.figure.savefig("benchmark_memory.png")

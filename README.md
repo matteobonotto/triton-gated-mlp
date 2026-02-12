@@ -47,3 +47,4 @@ out = gmlp(x)
 
 ## Benchmarks
 ![Alt text](images/benchmark_tflops.png)
+![Alt text](images/benchmark_memory.png)

@@ -89,7 +89,13 @@ if __name__ == "__main__":
     df_ops: pd.DataFrame = benchmark.run(
         show_plots=True, print_data=True, return_df=True
     )[0]
-    ax = df_ops.plot(x="N", kind="bar", y=["torch", "triton"], ylabel="TFLOPS", title=f"TFLOPS - {str(DTYPE).replace('torch.', '')}")
+    ax = df_ops.plot(
+        x="N",
+        kind="bar",
+        y=["torch", "triton"],
+        ylabel="TFLOPS",
+        title=f"TFLOPS - {str(DTYPE).replace('torch.', '')}",
+    )
     ax.figure.tight_layout()
     ax.figure.savefig("benchmark_tflops.png")
 
@@ -118,6 +124,12 @@ if __name__ == "__main__":
     df_mem: pd.DataFrame = benchmark.run(
         show_plots=True, print_data=True, return_df=True
     )[0]
-    ax = df_mem.plot(x="N", kind="bar", y=["torch", "triton"], ylabel="MB", title=f"Mem. [MB] - {str(DTYPE).replace('torch.', '')}")
+    ax = df_mem.plot(
+        x="N",
+        kind="bar",
+        y=["torch", "triton"],
+        ylabel="MB",
+        title=f"Mem. [MB] - {str(DTYPE).replace('torch.', '')}",
+    )
     ax.figure.tight_layout()
     ax.figure.savefig("benchmark_memory.png")

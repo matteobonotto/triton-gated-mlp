@@ -17,7 +17,8 @@ def get_target_dtype(x: Tensor) -> str:
         case _:
             message = f"Got unexpected dtype: {x.dtype}"
             raise TypeError(message)
-        
+
+
 @triton.jit()
 def map_dtype(x, dtype):
     match dtype:
@@ -27,10 +28,11 @@ def map_dtype(x, dtype):
             return x.to(tl.bfloat16)
         case "float16":
             return x.to(tl.float16)
-        
-        
+
+
 def is_hopper():
     return torch.cuda.get_device_capability()[0] == 9
+
 
 def cdiv(num: int, den: int) -> int:
     return math.ceil(num / den)
@@ -45,23 +47,33 @@ def get_shared_mem_limit(device: Optional[torch.device] = None) -> int:
     return props.shared_memory_per_block
 
 
-
-def validate_dimensions(
-    x: Tensor,
-    WT_up: Tensor,  # this one is transposed
-    b_up: Tensor | None,
-    WT_gp: Tensor,  # this one is transposed
-    b_gp: Tensor | None,
+def validate_dimensions_gmlp(
+    hidden_states: Tensor,
+    Wu: Tensor,  # this one is transposed
+    Wg: Tensor,  # this one is transposed
+    bu: Tensor | None = None,
+    bg: Tensor | None = None,
+    Wo: Tensor | None = None,  # this one is transposed
+    bo: Tensor | None = None,
 ) -> None:
-    assert x.ndim <= 2, f"input tensor must have ndims <=2, got {x.ndim}"
-    assert WT_up.shape[1] == x.shape[1], "dimension mismatch in WT_up or x"
-    assert WT_gp.shape == WT_up.shape, "dimension mismatch in WT_up or WT_gp"
+    assert (
+        hidden_states.ndim <= 2
+    ), f"input tensor must have ndims <=2, got {hidden_states.ndim}"
+    assert Wu.shape[1] == hidden_states.shape[1], "dimension mismatch in Wu or x"
+    assert Wu.shape == Wg.shape, "dimension mismatch in Wu or Wg"
 
-    if b_up is not None:
-        assert b_up.shape[0] == WT_up.shape[0], "dimension mismatch in b_up"
+    if Wo is not None:
+        Wo.shape[0] == hidden_states.shape[1], "dimension mismatch in Wo or x"
+        Wo.shape[1] == Wu.shape[0], "dimension mismatch in Wo or Wu"
 
-    if b_gp is not None:
-        assert b_gp.shape[0] == WT_up.shape[0], "dimension mismatch in b_gp"
+    if bu is not None:
+        assert bu.shape[0] == Wu.shape[0], "dimension mismatch in bu"
+
+    if bg is not None:
+        assert bg.shape[0] == Wg.shape[0], "dimension mismatch in bg"
+
+    if bo is not None:
+        assert bo.shape[0] == Wo.shape[0], "dimension mismatch in bo"
 
 
 def pad_tensor_16_byte_aligned(t: Tensor, axis: int) -> Tensor:

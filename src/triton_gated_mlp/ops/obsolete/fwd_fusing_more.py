@@ -5,22 +5,23 @@ from typing import Optional
 import math
 from torch import Tensor
 
-from .utils import (
+from ..utils import (
     get_num_streaming_multiprocessors,
     validate_dimensions,
     cdiv,
     map_pid_m_n,
     get_shared_mem_limit,
     is_hopper,
-    map_dtype, 
+    map_dtype,
     get_target_dtype,
 )
 from .fwd import _act_fwd
 
 
-
 def prune_invalid_configs(configs, named_args, **kwargs):
-    M = named_args["M"]; N = named_args["N"]; K = named_args["K"]
+    M = named_args["M"]
+    N = named_args["N"]
+    K = named_args["K"]
 
     # Hopper SMEM per-SM is 228KB physical, but many toolchains effectively cap at 99KB
     # Your error reports 101376 bytes, so use that.
@@ -28,7 +29,7 @@ def prune_invalid_configs(configs, named_args, **kwargs):
 
     # infer element size (rough). If you always use fp16/bf16 loads for x/W, set 2.
     # If you sometimes stage fp32, set 4.
-    BYTES = 2 #if DTYPE == torch.float32 else 2 
+    BYTES = 2  # if DTYPE == torch.float32 else 2
 
     pruned = []
     for cfg in configs:
@@ -47,10 +48,7 @@ def prune_invalid_configs(configs, named_args, **kwargs):
         # Conservative estimate: tiles staged simultaneously per stage
         # x + up + gp + op  (you can tune this formula to your kernel’s actual staging)
         smem_per_stage = (
-            BM * BK   # x
-            + BN * BK # WT_up
-            + BN * BK # WT_gp
-            + BK * BN # WT_op
+            BM * BK + BN * BK + BN * BK + BK * BN  # x  # WT_up  # WT_gp  # WT_op
         ) * BYTES
 
         smem_est = smem_per_stage * num_stages
@@ -67,20 +65,35 @@ def autotune_config(pre_hook=None):
     return [
         triton.Config(
             {
-                'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS, 
-            }, num_stages=s, num_warps=w)  #
-        for BM in [32, 64, 128,]  #
-        for BN in [64, 128, 256, ]  #
+                "BLOCK_SIZE_M": BM,
+                "BLOCK_SIZE_N": BN,
+                "BLOCK_SIZE_K": BK,
+                "GROUP_SIZE_M": GS,
+            },
+            num_stages=s,
+            num_warps=w,
+        )  #
+        for BM in [
+            32,
+            64,
+            128,
+        ]  #
+        for BN in [
+            64,
+            128,
+            256,
+        ]  #
         for BK in [16, 32, 64]  #
         for GS in [2, 4]  #
         for s in ([1, 2, 4])  #
         for w in [4, 8]  #
     ]
 
+
 @triton.autotune(
-    configs=autotune_config(), 
+    configs=autotune_config(),
     key=["M", "N", "K"],
-    prune_configs_by={'early_config_prune': prune_invalid_configs}
+    prune_configs_by={"early_config_prune": prune_invalid_configs},
 )
 @triton.jit()
 def _fed_kernel(
@@ -140,7 +153,9 @@ def _fed_kernel(
     )
 
     ### persistent matmul: use the same kernel to compute several tiles of x_out
-    for pid_ in tl.range(pid, num_programs, NUM_SMS, flatten=flatten, warp_specialize=warp_specialize):
+    for pid_ in tl.range(
+        pid, num_programs, NUM_SMS, flatten=flatten, warp_specialize=warp_specialize
+    ):
         ### map pid to pid_m, pid_n
         pid_m, pid_n = map_pid_m_n(
             pid_, M, N, BLOCK_SIZE_M, BLOCK_SIZE_N, GROUP_SIZE_M, optimize_L2
@@ -164,11 +179,12 @@ def _fed_kernel(
 
         ### compute tile_o = tile_prod @ WT_op.T
         for offset_k in tl.range(0, K, BLOCK_SIZE_K):
-            WT_op = WT_op_desc.load(offsets=[offset_k, offset_n])#.to(tl.float32)
+            WT_op = WT_op_desc.load(offsets=[offset_k, offset_n])  # .to(tl.float32)
             acc = x_out_desc.load(offsets=[offset_m, offset_k]).to(tl.float32)
             acc = tl.dot(tile_prod, WT_op.T, acc=acc)
-            x_out_desc.store(offsets=[offset_m, offset_k], value=map_dtype(acc, target_dtype))
-
+            x_out_desc.store(
+                offsets=[offset_m, offset_k], value=map_dtype(acc, target_dtype)
+            )
 
 
 @torch.no_grad()
@@ -182,7 +198,7 @@ def mlp_hidden_states_fwd(
     b_op: Tensor | None = None,
     b_up: Tensor | None = None,
     dropout_p: float = 0.0,
-    warp_specialize: bool = False, 
+    warp_specialize: bool = False,
 ) -> Tensor:
     """
     This function computes the follwing operations in a fused fashion:
@@ -215,14 +231,15 @@ def mlp_hidden_states_fwd(
     # implementation (one kernel may execute more programs of the grid,
     # not just a single one).
     NUM_SMS = get_num_streaming_multiprocessors()
-    grid = lambda META: (min(
-        (NUM_SMS, cdiv(K, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))
-    ),)
+    grid = lambda META: (
+        min((NUM_SMS, cdiv(K, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))),
+    )
     flatten = False if (warp_specialize and is_hopper()) else True
 
     ### custom allocation function
     def allocator(size, stream: int, allignment: Optional[int]):
         return torch.empty(size, device=x.device, dtype=torch.int8)
+
     triton.set_allocator(allocator)
 
     ###
@@ -243,9 +260,9 @@ def mlp_hidden_states_fwd(
             N,
             K,
             NUM_SMS,
-            flatten, 
+            flatten,
             warp_specialize,
-            target_dtype, 
+            target_dtype,
         )
 
     return x_out.to(x.dtype) if x_out.dtype != x.dtype else x_out

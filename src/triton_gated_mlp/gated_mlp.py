@@ -3,8 +3,9 @@ from torch import nn
 import torch
 from collections import OrderedDict
 
-from .ops.fwd import mlp_hidden_states_fwd
-from .ops.bwd import mlp_hidden_states_bwd
+from .ops.fwd_block import mlp_hidden_states_fwd
+
+# from .ops.bwd import mlp_hidden_states_bwd
 
 
 class ClassInstantier(OrderedDict):

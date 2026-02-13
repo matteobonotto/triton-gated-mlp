@@ -28,6 +28,7 @@ import triton_dejavu
 from .activations import _act_fwd, _act_bwd
 from .utils import map_pid_m_n, get_num_streaming_multiprocessors
 
+
 def get_smem_limit(device=None):
     if device is None:
         device = torch.cuda.current_device()
@@ -36,8 +37,11 @@ def get_smem_limit(device=None):
     # This is the maximum dynamic shared memory per block (bytes)
     return props.shared_memory_per_block
 
+
 def prune_invalid_configs(configs, named_args, **kwargs):
-    M = named_args["M"]; N = named_args["N"]; K = named_args["K"]
+    M = named_args["M"]
+    N = named_args["N"]
+    K = named_args["K"]
 
     # Hopper SMEM per-SM is 228KB physical, but many toolchains effectively cap at 99KB
     # Your error reports 101376 bytes, so use that.
@@ -64,10 +68,7 @@ def prune_invalid_configs(configs, named_args, **kwargs):
         # Conservative estimate: tiles staged simultaneously per stage
         # x + up + gp + op  (you can tune this formula to your kernel’s actual staging)
         smem_per_stage = (
-            BM * BK   # x
-            + BN * BK # WT_up
-            + BN * BK # WT_gp
-            + BK * BN # WT_op
+            BM * BK + BN * BK + BN * BK + BK * BN  # x  # WT_up  # WT_gp  # WT_op
         ) * BYTES
 
         smem_est = smem_per_stage * num_stages
@@ -78,6 +79,7 @@ def prune_invalid_configs(configs, named_args, **kwargs):
     if not pruned:
         pruned = [configs[0]]  # keep something
     return pruned
+
 
 def launch_metadata(grid, kernel, args):
     ret = {}
@@ -138,9 +140,9 @@ def get_autotune_config_space():
 #     use_bo=True,
 # )
 @triton.autotune(
-    configs=get_autotune_configs(), 
+    configs=get_autotune_configs(),
     key=["M", "N", "K"],
-    prune_configs_by={'early_config_prune': prune_invalid_configs}
+    prune_configs_by={"early_config_prune": prune_invalid_configs},
 )
 @triton.jit()
 def _fwd_kernel(

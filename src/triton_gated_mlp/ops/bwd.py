@@ -8,7 +8,7 @@ import math
 import triton_dejavu
 
 from .utils import get_num_streaming_multiprocessors, map_pid_m_n
-from .act import _act_bwd, _act_fwd
+from .activations import _act_bwd, _act_fwd
 
 
 def launch_metadata(grid, kernel, args):

@@ -2,11 +2,48 @@ import triton
 import triton.language as tl
 import torch
 from torch import Tensor
+from typing import Optional
 import math
 
 
+def get_target_dtype(x: Tensor) -> str:
+    match x.dtype:
+        case torch.float32:
+            return "float32"
+        case torch.bfloat16:
+            return "bf16"
+        case torch.float16:
+            return "float16"
+        case _:
+            message = f"Got unexpected dtype: {x.dtype}"
+            raise TypeError(message)
+        
+@triton.jit()
+def map_dtype(x, dtype):
+    match dtype:
+        case "float32":
+            return x.to(tl.float32)
+        case "bf16":
+            return x.to(tl.bfloat16)
+        case "float16":
+            return x.to(tl.float16)
+        
+        
+def is_hopper():
+    return torch.cuda.get_device_capability()[0] == 9
+
 def cdiv(num: int, den: int) -> int:
     return math.ceil(num / den)
+
+
+def get_shared_mem_limit(device: Optional[torch.device] = None) -> int:
+    if device is None:
+        device = torch.cuda.current_device()
+    props = torch.cuda.get_device_properties(device)
+
+    # This is the maximum dynamic shared memory per block (bytes)
+    return props.shared_memory_per_block
+
 
 
 def validate_dimensions(

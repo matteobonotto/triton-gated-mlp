@@ -10,10 +10,78 @@ from .utils import (
     validate_dimensions,
     cdiv,
     map_pid_m_n,
+    get_shared_mem_limit,
+    is_hopper,
+    map_dtype, 
+    get_target_dtype,
 )
 from .fwd import _act_fwd
 
 
+
+def prune_invalid_configs(configs, named_args, **kwargs):
+    M = named_args["M"]; N = named_args["N"]; K = named_args["K"]
+
+    # Hopper SMEM per-SM is 228KB physical, but many toolchains effectively cap at 99KB
+    # Your error reports 101376 bytes, so use that.
+    SMEM_LIMIT = get_shared_mem_limit(torch.device("cuda:0"))
+
+    # infer element size (rough). If you always use fp16/bf16 loads for x/W, set 2.
+    # If you sometimes stage fp32, set 4.
+    BYTES = 2 #if DTYPE == torch.float32 else 2 
+
+    pruned = []
+    for cfg in configs:
+        BM = cfg.kwargs["BLOCK_SIZE_M"]
+        BN = cfg.kwargs["BLOCK_SIZE_N"]
+        BK = cfg.kwargs["BLOCK_SIZE_K"]
+
+        # basic "fits problem" (optional)
+        if BM > M or BN > N or BK > K:
+            continue
+
+        num_stages = getattr(cfg, "num_stages", None)
+        if num_stages is None:
+            num_stages = 2  # conservative default if you don't set it per-config
+
+        # Conservative estimate: tiles staged simultaneously per stage
+        # x + up + gp + op  (you can tune this formula to your kernel’s actual staging)
+        smem_per_stage = (
+            BM * BK   # x
+            + BN * BK # WT_up
+            + BN * BK # WT_gp
+            + BK * BN # WT_op
+        ) * BYTES
+
+        smem_est = smem_per_stage * num_stages
+
+        if smem_est <= SMEM_LIMIT:
+            pruned.append(cfg)
+
+    if not pruned:
+        pruned = [configs[0]]  # keep something
+    return pruned
+
+
+def autotune_config(pre_hook=None):
+    return [
+        triton.Config(
+            {
+                'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": GS, 
+            }, num_stages=s, num_warps=w)  #
+        for BM in [32, 64, 128,]  #
+        for BN in [64, 128, 256, ]  #
+        for BK in [16, 32, 64]  #
+        for GS in [2, 4]  #
+        for s in ([1, 2, 4])  #
+        for w in [4, 8]  #
+    ]
+
+@triton.autotune(
+    configs=autotune_config(), 
+    key=["M", "N", "K"],
+    prune_configs_by={'early_config_prune': prune_invalid_configs}
+)
 @triton.jit()
 def _fed_kernel(
     x_ptr,
@@ -25,8 +93,11 @@ def _fed_kernel(
     dropout_p,
     M,
     N,
-    K,
+    K: tl.constexpr,
     NUM_SMS,
+    flatten: tl.constexpr,
+    warp_specialize: tl.constexpr,
+    target_dtype: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
@@ -69,7 +140,7 @@ def _fed_kernel(
     )
 
     ### persistent matmul: use the same kernel to compute several tiles of x_out
-    for pid_ in tl.range(pid, num_programs, NUM_SMS):
+    for pid_ in tl.range(pid, num_programs, NUM_SMS, flatten=flatten, warp_specialize=warp_specialize):
         ### map pid to pid_m, pid_n
         pid_m, pid_n = map_pid_m_n(
             pid_, M, N, BLOCK_SIZE_M, BLOCK_SIZE_N, GROUP_SIZE_M, optimize_L2
@@ -77,8 +148,6 @@ def _fed_kernel(
 
         offset_m = pid_m * BLOCK_SIZE_M
         offset_n = pid_n * BLOCK_SIZE_N
-
-        print(pid, pid_, pid_m, pid_n, offset_m, offset_n)
 
         ### compute tile_p = (tile_x @ tile_WT_up) * act(tile_x @ tile_WT_gp)
         tile_up = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
@@ -95,10 +164,11 @@ def _fed_kernel(
 
         ### compute tile_o = tile_prod @ WT_op.T
         for offset_k in tl.range(0, K, BLOCK_SIZE_K):
-            WT_op = WT_op_desc.load(offsets=[offset_k, offset_n])
-            acc = x_out_desc.load(offsets=[offset_m, offset_k])
-            out = tl.dot(tile_prod, WT_op.T, acc=acc)
-            x_out_desc.store(offsets=[offset_m, offset_k], value=out)
+            WT_op = WT_op_desc.load(offsets=[offset_k, offset_n])#.to(tl.float32)
+            acc = x_out_desc.load(offsets=[offset_m, offset_k]).to(tl.float32)
+            acc = tl.dot(tile_prod, WT_op.T, acc=acc)
+            x_out_desc.store(offsets=[offset_m, offset_k], value=map_dtype(acc, target_dtype))
+
 
 
 @torch.no_grad()
@@ -112,6 +182,7 @@ def mlp_hidden_states_fwd(
     b_op: Tensor | None = None,
     b_up: Tensor | None = None,
     dropout_p: float = 0.0,
+    warp_specialize: bool = False, 
 ) -> Tensor:
     """
     This function computes the follwing operations in a fused fashion:
@@ -143,32 +214,21 @@ def mlp_hidden_states_fwd(
     ### Create the grid: we are using tensor_descriptor in a persistent
     # implementation (one kernel may execute more programs of the grid,
     # not just a single one).
-    def get_dummy_META():
-        return {
-            "BLOCK_SIZE_M": 16,
-            "BLOCK_SIZE_N": 8,
-            "BLOCK_SIZE_K": 16,
-            "GROUP_SIZE_M": 1,
-        }
-
-    META = get_dummy_META()
     NUM_SMS = get_num_streaming_multiprocessors()
-    # NUM_SMS = 2
-    grid = (
-        min((NUM_SMS, cdiv(K, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))),
-    )
-    # grid = lambda META: min(
-    #     (NUM_SMS, cdiv(K, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))
-    # ),
+    grid = lambda META: (min(
+        (NUM_SMS, cdiv(K, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))
+    ),)
+    flatten = False if (warp_specialize and is_hopper()) else True
 
     ### custom allocation function
     def allocator(size, stream: int, allignment: Optional[int]):
         return torch.empty(size, device=x.device, dtype=torch.int8)
-
     triton.set_allocator(allocator)
 
     ###
+    # x_out = torch.zeros_like(x, dtype=torch.float32, device=x.device)
     x_out = torch.zeros_like(x, dtype=x.dtype, device=x.device)
+    target_dtype = get_target_dtype(x)
 
     with torch.cuda.device(x.device):
         _fed_kernel[grid](
@@ -183,10 +243,9 @@ def mlp_hidden_states_fwd(
             N,
             K,
             NUM_SMS,
-            META["BLOCK_SIZE_M"],
-            META["BLOCK_SIZE_N"],
-            META["BLOCK_SIZE_K"],
-            META["GROUP_SIZE_M"],
+            flatten, 
+            warp_specialize,
+            target_dtype, 
         )
 
-    return x_out
+    return x_out.to(x.dtype) if x_out.dtype != x.dtype else x_out

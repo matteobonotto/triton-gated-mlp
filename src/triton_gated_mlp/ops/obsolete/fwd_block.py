@@ -22,6 +22,11 @@ def is_at_least_hopper() -> bool:
 def maybe_flatten(warp_specialize: bool) -> bool:
     return False if (warp_specialize and is_at_least_hopper()) else True
 
+@triton.jit()
+def _dropout_fwd(
+    x_ptr,
+):
+    raise NotImplementedError("_dropout_fwd not implemented yet!!")
 
 def prune_invalid_configs(configs, named_args, **kwargs):
     M = named_args["M"]
@@ -66,6 +71,7 @@ def prune_invalid_configs(configs, named_args, **kwargs):
     return pruned
 
 
+
 def get_autotune_configs(pre_hook=None):
     return [
         triton.Config(
@@ -86,18 +92,6 @@ def get_autotune_configs(pre_hook=None):
         # for SUBTILE in [True, False]  #
     ]
 
-
-@triton.jit()
-def map_dtype(target_dtype):
-    if target_dtype == "float16":
-        dtype =tl.float16
-    elif target_dtype == "bfloat16":
-        dtype = tl.bfloat16 
-    elif target_dtype == "float32":
-        dtype = tl.float32
-    else:
-        raise TypeError()
-    return dtype
 
 
 @triton.autotune(
@@ -120,11 +114,7 @@ def _fwd_kernel(
     xo_str_0,
     xo_str_1,
     act_fn: tl.constexpr,
-    HAS_DROPOUT: tl.constexpr, 
     dropout_p,
-    d_mask_ptr,
-    d_mask_str_0,
-    d_mask_str_1,
     M: tl.constexpr,
     N: tl.constexpr,
     K: tl.constexpr,
@@ -146,7 +136,7 @@ def _fwd_kernel(
     optimize_L2 = True
 
     arange_M = tl.arange(0, BLOCK_SIZE_M)
-    arange_k = tl.arange(0, BLOCK_SIZE_K)
+    arange_K = tl.arange(0, BLOCK_SIZE_K)
     arange_N = tl.arange(0, BLOCK_SIZE_N)
 
     for pid_ in tl.range(
@@ -160,38 +150,44 @@ def _fwd_kernel(
             pid_, M, N, BLOCK_SIZE_M, BLOCK_SIZE_N, GROUP_SIZE_M, optimize_L2
         )
 
-        offset_m = (pid_m * BLOCK_SIZE_M + arange_M) % M
-        offset_n = (pid_n * BLOCK_SIZE_N + arange_N) % N
+        offset_m = pid_m * BLOCK_SIZE_M + arange_M
+        offset_n = pid_n * BLOCK_SIZE_N + arange_N
 
-        tile_x_ptr = x_ptr + offset_m[:, None] * x_str_0 + arange_k[None, :] * x_str_1
-        tile_Wu_ptr = (
-            Wu_ptr + offset_n[:, None] * Wu_str_0 + arange_k[None, :] * Wu_str_1
-        )
-        tile_Wg_ptr = (
-            Wg_ptr + offset_n[:, None] * Wg_str_0 + arange_k[None, :] * Wg_str_1
-        )
+        mask_m = (offset_m < M)[:, None]
+        mask_n = (offset_n < N)[:, None]
 
         tile_u = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
         tile_g = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-            
-            mask_k = arange_k[None, :] < K - k * BLOCK_SIZE_K
-            tile_x = tl.load(tile_x_ptr, mask=mask_k, other=0.0)
-            tile_Wg = tl.load(tile_Wg_ptr, mask=mask_k, other=0.0)
-            tile_Wu = tl.load(tile_Wu_ptr, mask=mask_k, other=0.0)
+        for k in tl.range(0, K, BLOCK_SIZE_K):
+            offset_k = k + arange_K
+            mask_k = offset_k < K
+
+            tile_x_ptr = x_ptr + offset_m[:, None] * x_str_0 + offset_k[None, :] * x_str_1
+            tile_Wu_ptr = (
+                Wu_ptr + offset_n[:, None] * Wu_str_0 + offset_k[None, :] * Wu_str_1
+            )
+            tile_Wg_ptr = (
+                Wg_ptr + offset_n[:, None] * Wg_str_0 + offset_k[None, :] * Wg_str_1
+            )
+
+            tile_x = tl.load(tile_x_ptr, mask_m & mask_k[None, :], other=0.0)
+            tile_Wg = tl.load(tile_Wg_ptr, mask_n & mask_k[None, :], other=0.0)
+            tile_Wu = tl.load(tile_Wu_ptr, mask_n & mask_k[None, :], other=0.0)
 
             tile_u = tl.dot(tile_x, tile_Wu.T, acc=tile_u)
             tile_g = tl.dot(tile_x, tile_Wg.T, acc=tile_g)
             ...
 
-            # slide the tile_a, tile_b pointers along Z direction of BLOCK_SIZE_K steps
-            tile_x_ptr += BLOCK_SIZE_K * x_str_1
-            tile_Wg_ptr += BLOCK_SIZE_K * Wu_str_1
-            tile_Wu_ptr += BLOCK_SIZE_K * Wg_str_1
+            # TODO: slide the tile_a, tile_b pointers along Z direction of BLOCK_SIZE_K steps
 
         # multiply and apply activation
         tile_o = tile_u * _act_fwd(tile_g, act_fn)
 
+        # apply dropout if needed
+        # if dropout_p > 0.:
+        #     tile_o = _dropout_fwd(tile_o)
+
+        ...
         ###
         if target_dtype == "float16":
             tile_o = tile_o.to(tl.float16)
@@ -202,13 +198,6 @@ def _fwd_kernel(
         else:
             raise TypeError()
 
-        ## apply dropout if needed
-        if HAS_DROPOUT:
-            tile_mask_ptr = d_mask_ptr + offset_m[:, None] * d_mask_str_0 + offset_n[None, :] * d_mask_str_1
-            tile_mask = tl.load(tile_mask_ptr)
-            tile_o = tl.where(tile_mask, tile_o / (1-dropout_p), 0.)
-
-        ###
         tile_xo = xo_ptr + offset_m[:, None] * xo_str_0 + offset_n[None, :] * xo_str_1
         mask_o = (offset_m < M)[:, None] & (offset_n < N)[None, :]
         tl.store(tile_xo, value=tile_o, mask=mask_o)
@@ -225,7 +214,6 @@ def mlp_hidden_states_fwd(
     bu: Tensor | None = None,
     dropout_p: float = 0.0,
     warp_specialize: bool = False,
-    training: bool = True, # for dropout application
 ) -> Tensor:
     """
     This function computes the follwing operations in a fused fashion:
@@ -241,15 +229,12 @@ def mlp_hidden_states_fwd(
     M, K = x.shape
     N, _ = Wu.shape
 
-    HAS_BIAS_UP = True if bu is not None else False
-    HAS_BIAS_GP = True if bg is not None else False
-
     ### Create the grid: we are using tensor_descriptor in a persistent
     # implementation (one kernel may execute more programs of the grid,
     # not just a single one).
     NUM_SMS = get_num_streaming_multiprocessors()
     grid = lambda META: (min(
-    (NUM_SMS, cdiv(M, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))
+    (NUM_SMS, cdiv(K, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))
     ),)
     flatten = maybe_flatten(warp_specialize)
     # (
@@ -264,29 +249,16 @@ def mlp_hidden_states_fwd(
     #     1,
     # )
     # grid = (min((NUM_SMS, cdiv(M, BLOCK_SIZE_M) * cdiv(N, BLOCK_SIZE_N))),)
-    
-    ### dropout mask
-    HAS_DROPOUT = True if training and dropout_p > 0. else False
-    if HAS_DROPOUT:
-        dropout_mask = torch.rand_like(x, dtype=x.dtype, device=x.device) > 1 - dropout_p
-    else:
-        dropout_mask = torch.tensor([[0.]], dtype=x.dtype, device=x.device)
-
     ###
     # xo = torch.zeros_like(x, dtype=torch.float32, device=x.device)
     xo = torch.zeros((M, N), dtype=x.dtype, device=x.device)
     target_dtype = get_target_dtype(x)
-
-    # print(f"{dropout_p=}")
-
 
     with torch.cuda.device(x.device):
         _fwd_kernel[grid](
             x,
             Wu,
             Wg,
-            bu, 
-            bg,
             xo,
             x.stride(0),
             x.stride(1),
@@ -294,16 +266,10 @@ def mlp_hidden_states_fwd(
             Wu.stride(1),
             Wg.stride(0),
             Wg.stride(1),
-            bu.stride(0),
-            bg.stride(0),
             xo.stride(0),
             xo.stride(1),
             act_fn,
-            HAS_DROPOUT, 
             dropout_p,
-            dropout_mask, 
-            dropout_mask.stride(0), 
-            dropout_mask.stride(1), 
             M,
             N,
             K,
@@ -317,4 +283,4 @@ def mlp_hidden_states_fwd(
             # GROUP_SIZE_M,
         )
 
-    return xo, dropout_mask #xo.to(x.dtype) if xo.dtype != x.dtype else xo
+    return xo.to(x.dtype) if xo.dtype != x.dtype else xo

@@ -12,7 +12,7 @@ import os
 
 # if "triton_dejavu_cache" in Path()
 
-from .utils import validate_dimensions
+from .utils import validate_dimensions_gmlp
 from ..const import ROOT_PATH
 
 CACHE_DIR = ROOT_PATH / Path("triton_dejavu_cache")
@@ -26,7 +26,7 @@ if not CACHE_DIR.exists():
 import triton_dejavu
 
 from .activations import _act_fwd, _act_bwd
-from .utils import map_pid_m_n, get_num_streaming_multiprocessors
+from .utils import map_pid_m_n, get_num_streaming_multiprocessors, pad_tensor_16_byte_aligned
 
 
 def get_smem_limit(device=None):
@@ -109,7 +109,7 @@ def get_autotune_configs(pre_hook=None):
         for BM in [32, 64, 128, 256]  #
         for BN in [32, 64, 128, 256]  #
         for BK in [32, 64, 128, 256]  #
-        for GS in [2, 4, 8, 16]  #
+        for GS in [2, 4, 8, 16, 32]  #
         # for s in ([2])  #
         # for w in [4]  #
         # for SUBTILE in [True, False]  #
@@ -245,11 +245,11 @@ def _fwd_kernel(
 def mlp_hidden_states_fwd(
     x: Tensor,
     WT_up: Tensor,  # this one is transposed
-    b_up: Tensor | None,
     WT_gp: Tensor,  # this one is transposed
-    b_gp: Tensor | None,
     act_fn: str,
-    dropout_p: float,
+    b_up: Tensor | None = None,
+    b_gp: Tensor | None = None,
+    dropout_p: float = 0.,
 ) -> Tensor:
     """
     This function computes the follwing operations in a fused fashion:
@@ -261,7 +261,7 @@ def mlp_hidden_states_fwd(
     """
 
     ### validate input dimension
-    validate_dimensions(x, WT_up, b_up, WT_gp, b_gp)
+    validate_dimensions_gmlp(hidden_states=x, Wu=WT_up, bu=b_up, Wg=WT_gp, bg=b_gp)
 
     M, K = x.shape
     N, _ = WT_up.shape
@@ -269,9 +269,9 @@ def mlp_hidden_states_fwd(
     ### triton tensor_descriptor needs tensors to have stride(0) that
     # is a multiple of 16. Check this and pad if needed.
     if K % 16 != 0:
-        raise NotImplementedError()
-        # a = pad_tensor_16_byte_aligned(a, axis=1)
-        # b = pad_tensor_16_byte_aligned(b, axis=0)
+        # raise NotImplementedError()
+        x = pad_tensor_16_byte_aligned(x, axis=1)
+        WT_up = pad_tensor_16_byte_aligned(WT_up, axis=1)
 
     if N % 16 != 0:
         raise NotImplementedError()

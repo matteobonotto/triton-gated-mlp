@@ -11,7 +11,7 @@ def get_target_dtype(x: Tensor) -> str:
         case torch.float32:
             return "float32"
         case torch.bfloat16:
-            return "bf16"
+            return "bfloat16"
         case torch.float16:
             return "float16"
         case _:
@@ -96,7 +96,7 @@ def get_num_streaming_multiprocessors() -> int:
 
 
 @triton.jit()
-def map_pid_m_n(pid, M, N, BLOCK_SIZE_M, BLOCK_SIZE_N, GROUP_SIZE_M, optimize_L2):
+def map_pid_m_n(pid, M, N, BLOCK_SIZE_M, BLOCK_SIZE_N, GROUP_SIZE_M, optimize_L2:tl.constexpr):
     if optimize_L2:
         pid_m, pid_n = map_pid_m_n_L2_optim(
             pid, M, N, BLOCK_SIZE_M, BLOCK_SIZE_N, GROUP_SIZE_M

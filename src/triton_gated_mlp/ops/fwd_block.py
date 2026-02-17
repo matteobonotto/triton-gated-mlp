@@ -90,9 +90,9 @@ def get_autotune_configs(pre_hook=None):
 @triton.jit()
 def map_dtype(target_dtype):
     if target_dtype == "float16":
-        dtype =tl.float16
+        dtype = tl.float16
     elif target_dtype == "bfloat16":
-        dtype = tl.bfloat16 
+        dtype = tl.bfloat16
     elif target_dtype == "float32":
         dtype = tl.float32
     else:
@@ -103,13 +103,15 @@ def map_dtype(target_dtype):
 @triton.autotune(
     configs=get_autotune_configs(),
     key=["M", "N", "K"],
-    prune_configs_by={'early_config_prune': prune_invalid_configs}
+    prune_configs_by={"early_config_prune": prune_invalid_configs},
 )
 @triton.jit()
 def _fwd_kernel(
     x_ptr,
     Wu_ptr,
     Wg_ptr,
+    bu_ptr,
+    bg_ptr,
     xo_ptr,
     x_str_0,
     x_str_1,
@@ -117,10 +119,14 @@ def _fwd_kernel(
     Wu_str_1,
     Wg_str_0,
     Wg_str_1,
+    HAS_BIAS_UP,
+    HAS_BIAS_GP,
+    bu_str_0,
+    bg_str_0,
     xo_str_0,
     xo_str_1,
     act_fn: tl.constexpr,
-    HAS_DROPOUT: tl.constexpr, 
+    HAS_DROPOUT: tl.constexpr,
     dropout_p,
     d_mask_ptr,
     d_mask_str_0,
@@ -174,7 +180,7 @@ def _fwd_kernel(
         tile_u = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
         tile_g = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
         for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-            
+
             mask_k = arange_k[None, :] < K - k * BLOCK_SIZE_K
             tile_x = tl.load(tile_x_ptr, mask=mask_k, other=0.0)
             tile_Wg = tl.load(tile_Wg_ptr, mask=mask_k, other=0.0)
@@ -182,12 +188,25 @@ def _fwd_kernel(
 
             tile_u = tl.dot(tile_x, tile_Wu.T, acc=tile_u)
             tile_g = tl.dot(tile_x, tile_Wg.T, acc=tile_g)
-            ...
 
             # slide the tile_a, tile_b pointers along Z direction of BLOCK_SIZE_K steps
             tile_x_ptr += BLOCK_SIZE_K * x_str_1
             tile_Wg_ptr += BLOCK_SIZE_K * Wu_str_1
             tile_Wu_ptr += BLOCK_SIZE_K * Wg_str_1
+
+        ### add bias is present
+        if HAS_BIAS_UP:
+            tile_bu_ptr = bu_ptr + offset_n * bu_str_0
+            tile_bu = tl.load(tile_bu_ptr)
+            tile_u += tile_bu[None, :]
+
+        if HAS_BIAS_GP:
+            tile_bg_ptr = bg_ptr + offset_n * bg_str_0
+            tile_bg = tl.load(tile_bg_ptr)
+            tile_g += tile_bg[None, :]
+            ...
+            # tile_u +
+        # ...
 
         # multiply and apply activation
         tile_o = tile_u * _act_fwd(tile_g, act_fn)
@@ -204,15 +223,18 @@ def _fwd_kernel(
 
         ## apply dropout if needed
         if HAS_DROPOUT:
-            tile_mask_ptr = d_mask_ptr + offset_m[:, None] * d_mask_str_0 + offset_n[None, :] * d_mask_str_1
+            tile_mask_ptr = (
+                d_mask_ptr
+                + offset_m[:, None] * d_mask_str_0
+                + offset_n[None, :] * d_mask_str_1
+            )
             tile_mask = tl.load(tile_mask_ptr)
-            tile_o = tl.where(tile_mask, tile_o / (1-dropout_p), 0.)
+            tile_o = tl.where(tile_mask, tile_o / (1 - dropout_p), 0.0)
 
         ###
         tile_xo = xo_ptr + offset_m[:, None] * xo_str_0 + offset_n[None, :] * xo_str_1
         mask_o = (offset_m < M)[:, None] & (offset_n < N)[None, :]
         tl.store(tile_xo, value=tile_o, mask=mask_o)
-
 
 
 @torch.no_grad()
@@ -225,7 +247,9 @@ def mlp_hidden_states_fwd(
     bu: Tensor | None = None,
     dropout_p: float = 0.0,
     warp_specialize: bool = False,
-    training: bool = True, # for dropout application
+    training: bool = True,  # for dropout application
+    HAS_BIAS_UP: bool = True,
+    HAS_BIAS_GP: bool = True,
 ) -> Tensor:
     """
     This function computes the follwing operations in a fused fashion:
@@ -236,21 +260,31 @@ def mlp_hidden_states_fwd(
     triton kernel when doing tl.dot(x, W.T, ...)
     """
 
+    if bu is None:
+        HAS_BIAS_UP = False
+        bu = torch.tensor([[0]], dtype=x.dtype, device=x.device)
+    # else:
+    #     if bu.ndim == 1:
+    #         bu = bu[None, :]
+    if bg is None:
+        HAS_BIAS_GP = False
+        bg = torch.tensor([[0]], dtype=x.dtype, device=x.device)
+    # else:
+    #     if bg.ndim == 1:
+    #         bg = bu[None, :]
+
     ### validate input dimension
     validate_dimensions_gmlp(hidden_states=x, Wu=Wu, Wg=Wg, bu=bu, bg=bg)
     M, K = x.shape
     N, _ = Wu.shape
 
-    HAS_BIAS_UP = True if bu is not None else False
-    HAS_BIAS_GP = True if bg is not None else False
-
     ### Create the grid: we are using tensor_descriptor in a persistent
     # implementation (one kernel may execute more programs of the grid,
     # not just a single one).
     NUM_SMS = get_num_streaming_multiprocessors()
-    grid = lambda META: (min(
-    (NUM_SMS, cdiv(M, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))
-    ),)
+    grid = lambda META: (
+        min((NUM_SMS, cdiv(M, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))),
+    )
     flatten = maybe_flatten(warp_specialize)
     # (
     #     BLOCK_SIZE_M,
@@ -264,13 +298,15 @@ def mlp_hidden_states_fwd(
     #     1,
     # )
     # grid = (min((NUM_SMS, cdiv(M, BLOCK_SIZE_M) * cdiv(N, BLOCK_SIZE_N))),)
-    
+
     ### dropout mask
-    HAS_DROPOUT = True if training and dropout_p > 0. else False
+    HAS_DROPOUT = True if training and dropout_p > 0.0 else False
     if HAS_DROPOUT:
-        dropout_mask = torch.rand_like(x, dtype=x.dtype, device=x.device) > 1 - dropout_p
+        dropout_mask = (
+            torch.rand_like(x, dtype=x.dtype, device=x.device) > 1 - dropout_p
+        )
     else:
-        dropout_mask = torch.tensor([[0.]], dtype=x.dtype, device=x.device)
+        dropout_mask = torch.tensor([[0.0]], dtype=x.dtype, device=x.device)
 
     ###
     # xo = torch.zeros_like(x, dtype=torch.float32, device=x.device)
@@ -279,13 +315,12 @@ def mlp_hidden_states_fwd(
 
     # print(f"{dropout_p=}")
 
-
     with torch.cuda.device(x.device):
         _fwd_kernel[grid](
             x,
             Wu,
             Wg,
-            bu, 
+            bu,
             bg,
             xo,
             x.stride(0),
@@ -294,16 +329,18 @@ def mlp_hidden_states_fwd(
             Wu.stride(1),
             Wg.stride(0),
             Wg.stride(1),
+            HAS_BIAS_UP,
+            HAS_BIAS_GP,
             bu.stride(0),
             bg.stride(0),
             xo.stride(0),
             xo.stride(1),
             act_fn,
-            HAS_DROPOUT, 
+            HAS_DROPOUT,
             dropout_p,
-            dropout_mask, 
-            dropout_mask.stride(0), 
-            dropout_mask.stride(1), 
+            dropout_mask,
+            dropout_mask.stride(0),
+            dropout_mask.stride(1),
             M,
             N,
             K,
@@ -317,4 +354,4 @@ def mlp_hidden_states_fwd(
             # GROUP_SIZE_M,
         )
 
-    return xo, dropout_mask #xo.to(x.dtype) if xo.dtype != x.dtype else xo
+    return xo, dropout_mask  # xo.to(x.dtype) if xo.dtype != x.dtype else xo

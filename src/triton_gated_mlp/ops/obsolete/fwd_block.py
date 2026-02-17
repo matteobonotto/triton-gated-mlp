@@ -22,11 +22,13 @@ def is_at_least_hopper() -> bool:
 def maybe_flatten(warp_specialize: bool) -> bool:
     return False if (warp_specialize and is_at_least_hopper()) else True
 
+
 @triton.jit()
 def _dropout_fwd(
     x_ptr,
 ):
     raise NotImplementedError("_dropout_fwd not implemented yet!!")
+
 
 def prune_invalid_configs(configs, named_args, **kwargs):
     M = named_args["M"]
@@ -71,7 +73,6 @@ def prune_invalid_configs(configs, named_args, **kwargs):
     return pruned
 
 
-
 def get_autotune_configs(pre_hook=None):
     return [
         triton.Config(
@@ -93,11 +94,10 @@ def get_autotune_configs(pre_hook=None):
     ]
 
 
-
 @triton.autotune(
     configs=get_autotune_configs(),
     key=["M", "N", "K"],
-    prune_configs_by={'early_config_prune': prune_invalid_configs}
+    prune_configs_by={"early_config_prune": prune_invalid_configs},
 )
 @triton.jit()
 def _fwd_kernel(
@@ -162,7 +162,9 @@ def _fwd_kernel(
             offset_k = k + arange_K
             mask_k = offset_k < K
 
-            tile_x_ptr = x_ptr + offset_m[:, None] * x_str_0 + offset_k[None, :] * x_str_1
+            tile_x_ptr = (
+                x_ptr + offset_m[:, None] * x_str_0 + offset_k[None, :] * x_str_1
+            )
             tile_Wu_ptr = (
                 Wu_ptr + offset_n[:, None] * Wu_str_0 + offset_k[None, :] * Wu_str_1
             )
@@ -203,7 +205,6 @@ def _fwd_kernel(
         tl.store(tile_xo, value=tile_o, mask=mask_o)
 
 
-
 @torch.no_grad()
 def mlp_hidden_states_fwd(
     x: Tensor,
@@ -233,9 +234,9 @@ def mlp_hidden_states_fwd(
     # implementation (one kernel may execute more programs of the grid,
     # not just a single one).
     NUM_SMS = get_num_streaming_multiprocessors()
-    grid = lambda META: (min(
-    (NUM_SMS, cdiv(K, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))
-    ),)
+    grid = lambda META: (
+        min((NUM_SMS, cdiv(K, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))),
+    )
     flatten = maybe_flatten(warp_specialize)
     # (
     #     BLOCK_SIZE_M,

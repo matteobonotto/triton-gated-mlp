@@ -26,7 +26,11 @@ if not CACHE_DIR.exists():
 import triton_dejavu
 
 from .activations import _act_fwd, _act_bwd
-from .utils import map_pid_m_n, get_num_streaming_multiprocessors, pad_tensor_16_byte_aligned
+from .utils import (
+    map_pid_m_n,
+    get_num_streaming_multiprocessors,
+    pad_tensor_16_byte_aligned,
+)
 
 
 def get_smem_limit(device=None):
@@ -249,7 +253,7 @@ def mlp_hidden_states_fwd(
     act_fn: str,
     b_up: Tensor | None = None,
     b_gp: Tensor | None = None,
-    dropout_p: float = 0.,
+    dropout_p: float = 0.0,
 ) -> Tensor:
     """
     This function computes the follwing operations in a fused fashion:

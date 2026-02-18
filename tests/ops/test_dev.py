@@ -24,13 +24,14 @@ def tiled(x, Wu, Wg, bu, bg, act, BLOCK_SIZE_M, BLOCK_SIZE_N):
             tile_bu = bu[n : n + BLOCK_SIZE_N]
             tile_bg = bg[n : n + BLOCK_SIZE_N]
 
-            tile_xp = (tile_x @ tile_Wu.T + tile_bu[None, :]) * act(tile_x @ tile_Wg.T + tile_bg[None, :])
+            tile_xp = (tile_x @ tile_Wu.T + tile_bu[None, :]) * act(
+                tile_x @ tile_Wg.T + tile_bg[None, :]
+            )
 
             xo_[m : m + BLOCK_SIZE_M, n : n + BLOCK_SIZE_N] = tile_xp
             ...
 
     return xo_
-
 
 
 @pytest.mark.skip("dev")
@@ -47,8 +48,8 @@ def test_dev():
         89,
         37,
     )
-    
-    x = torch.rand(M, K).to(DEVICE) 
+
+    x = torch.rand(M, K).to(DEVICE)
     Wu = torch.rand(N, K).to(DEVICE)
     bu = torch.rand(N).to(DEVICE)
     Wg = torch.rand(N, K).to(DEVICE)
@@ -56,12 +57,13 @@ def test_dev():
     Wo = torch.rand(K, N).to(DEVICE)
 
     from torch import nn
+
     l = nn.Linear(K, N).to(DEVICE)
 
     l(x)
 
     p = 0
-    # x = create_tensor(M, K).to(DEVICE) 
+    # x = create_tensor(M, K).to(DEVICE)
     # print(x)
     # Wu = create_tensor(N, K).to(DEVICE)
     # Wg = create_tensor(N, K).to(DEVICE)
@@ -76,13 +78,13 @@ def test_dev():
     ### do it in a tiled way: outer loop along Wo rows, inner loop on x rows and (Wu, Wg) cols
     BLOCK_SIZE_M, BLOCK_SIZE_N = 4, 4
     xp_ = tiled(x, Wu, Wg, bu, bg, act, BLOCK_SIZE_M, BLOCK_SIZE_N)
-    if p == 0.:
+    if p == 0.0:
         assert ((xp - xp_).norm() / xp.norm()) < 1e-6
     # print(xp_)
 
     # x =
 
-    xp__, mask = mlp_hidden_states_fwd(x, Wu=Wu, Wg=Wg, bu=bu, bg=bg, act_fn="silu", dropout_p=p)
+    xp__, mask = mlp_hidden_states_fwd(
+        x, Wu=Wu, Wg=Wg, bu=bu, bg=bg, act_fn="silu", dropout_p=p
+    )
     assert ((xp - xp__).norm() / xp.norm()) < 1e-6
-
-

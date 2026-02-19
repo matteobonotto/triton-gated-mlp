@@ -14,8 +14,7 @@ setup:
 install:
 	pip3 install -U pip
 	pip3 install build
-	pip install poetry
-	poetry install
+	poetry install -e .[dev]
 
 
 # -----------------------------------------------------

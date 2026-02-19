@@ -1,0 +1,73 @@
+Metadata-Version: 2.4
+Name: triton-gated-mlp
+Version: 0.0.1
+Summary: Triton implementation of gated-mlp module.
+Author-email: Matteo Bonotto <m.bonotto@outlook.com>
+Requires-Python: <3.15,>=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+Requires-Dist: triton~=3.5.0
+Requires-Dist: torch~=2.9.0
+Requires-Dist: matplotlib~=3.10.7
+Requires-Dist: pandas~=2.3.3
+Requires-Dist: psutil~=7.1.3
+Requires-Dist: tqdm~=4.67.1
+Requires-Dist: smac~=2.3.1
+Requires-Dist: ConfigSpace~=1.2.1
+Requires-Dist: triton-dejavu @ git+https://github.com/IBM/triton-dejavu.git
+Provides-Extra: dev
+Requires-Dist: black; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ipykernel<7.0,>=6.0; extra == "dev"
+
+# triton-gated-mlp
+
+Triton implementation of the gated-mlp module. We use `triton-dejavu` (see [here](https://github.com/IBM/triton-dejavu)) for better caching of the autotuning configs, so you don't need to run the autotune each time.
+
+
+## Installation
+Just do the following steps:
+1. clone the repo and `cd triton-gated-mlp`
+1. `make install` to set-up all the stuff and create the vistualenv
+2. `properly set-up `triton-dejavu`, providing a folder with proper permissions to cache the optimal parameters found by the autotuner:
+```shell
+sudo mkdir -p $(pwd)/triton_dejavu_cache/
+sudo chmod o+rw $(pwd)/triton_dejavu_cache/
+echo "export TRITON_DEJAVU_STORAGE=$(pwd)/triton_dejavu_cache" >> ~/.bashrc # needed for triton-dejavu
+```
+3. `make install` to install all the project dependencies and the package
+
+## Autotuning
+It is strongly suggested to run, as first thing after the installation, the command
+```shell
+make autotune
+```
+this will run the autotuner over a large parameter space for the matrix-matrix multiplications, finding the optimal parameters for different matrix dimensions.
+
+## Usage
+A simple example:
+```python
+
+import torch
+from triton_gated_mlp.gated_mlp import FusedGatedMLP
+
+M = 128 # sequence lenght
+K = 512 # hidden size
+N = 256 # intermediate size
+
+x = torch.rand((M, K), device="cuda", dtype=torch.float16)
+gnlp = FusedGatedMLP(
+    hidden_size=K, 
+    intermediate_size=N,
+    dropout_p=0.0, 
+    bias=False,
+)
+
+out = gmlp(x)
+
+```
+
+## Benchmarks
+![Alt text](images/benchmark_tflops.png)
+![Alt text](images/benchmark_memory.png)

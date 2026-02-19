@@ -3,7 +3,9 @@ import random
 import torch
 from torch import autograd
 
-DEVICE = torch.device("cuda")
+from triton_gated_mlp.utils import get_device
+
+DEVICE = get_device()
 
 
 def norm_diff(a, b):
@@ -42,8 +44,28 @@ def test_bwd():
     dx, dWu, dbu, dWg, dbg = autograd.grad(
         xp, (x, Wu, bu, Wg, bg), grad_outputs=grad_outputs
     )
+    
+    dropout_prime = torch.ones_like(grad_outputs, dtype=x.dtype, device=x.device)
+    
+    # dWu, dbu
+    dWu_ = ((grad_outputs * dropout_prime) * xa).T @ x
+    dbu_ = ((grad_outputs * dropout_prime) * xa).sum(dim=-2)
+    
+    # dWg, dbg
+    sigma = 1 / (1 + torch.exp(-xg))
+    act_prime = sigma * (1 + xg * (1 - sigma))    
+    dWg_ = (((grad_outputs * dropout_prime) * xu) * act_prime).T @ x
+    dbg_ = (((grad_outputs * dropout_prime) * xu) * act_prime).sum(dim=-2)
+    
+    # dx
+    dx_tilde = grad_outputs * dropout_prime
+    dx_ = (dx_tilde * xu * act_prime) @ Wg + (dx_tilde * xa) @ Wu
 
-    assert norm_diff(dWu, (grad_outputs * xa).T @ x) < 1e-6
+    assert norm_diff(dWu, dWu_) < 1e-6
+    assert norm_diff(dbu, dbu_) < 1e-6
+    assert norm_diff(dWg, dWg_) < 1e-6
+    assert norm_diff(dbg, dbg_) < 1e-6
+    assert norm_diff(dx, dx_) < 1e-6
 
 
 test_bwd()

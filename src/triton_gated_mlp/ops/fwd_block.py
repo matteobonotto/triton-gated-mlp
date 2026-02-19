@@ -77,10 +77,10 @@ def get_autotune_configs(pre_hook=None):
             },
             pre_hook=pre_hook,
         )  #
-        for BM in [32, 64, 128, 256]  #
-        for BN in [32, 64, 128, 256]  #
-        for BK in [32, 64, 128, 256]  #
-        for GS in [2, 4, 8, 16, 32]  #
+        for BM in [64, 128]  #
+        for BN in [64, 128]  #
+        for BK in [32, 64, 128]  #
+        for GS in [4, 8, 16]  #
         # for s in ([2])  #
         # for w in [4]  #
         # for SUBTILE in [True, False]  #
@@ -100,11 +100,12 @@ def map_dtype(target_dtype):
     return dtype
 
 
-@triton.autotune(
-    configs=get_autotune_configs(),
-    key=["M", "N", "K"],
-    prune_configs_by={"early_config_prune": prune_invalid_configs},
-)
+# @triton.autotune(
+#     configs=get_autotune_configs(),
+#     key=["M", "N", "K"],
+#     prune_configs_by={"early_config_prune": prune_invalid_configs},
+#     restore_value=["xo_ptr", "d_mask_ptr"]
+# )
 @triton.jit()
 def _fwd_kernel(
     x_ptr,
@@ -119,8 +120,8 @@ def _fwd_kernel(
     Wu_str_1,
     Wg_str_0,
     Wg_str_1,
-    HAS_BIAS_UP,
-    HAS_BIAS_GP,
+    HAS_BIAS_UP: tl.constexpr,
+    HAS_BIAS_GP: tl.constexpr,
     bu_str_0,
     bg_str_0,
     xo_str_0,
@@ -229,7 +230,7 @@ def _fwd_kernel(
                 + offset_n[None, :] * d_mask_str_1
             )
             tile_mask = tl.load(tile_mask_ptr)
-            tile_o = tl.where(tile_mask, tile_o / (1 - dropout_p), 0.0)
+            tile_o = tl.where(tile_mask, tile_o / (1 - dropout_p), 0.)
 
         ###
         tile_xo = xo_ptr + offset_m[:, None] * xo_str_0 + offset_n[None, :] * xo_str_1
@@ -259,6 +260,8 @@ def mlp_hidden_states_fwd(
     Wieghts WT_up and WT_gp are kept transposed, and they are transposed back inside the
     triton kernel when doing tl.dot(x, W.T, ...)
     """
+    ### validate input dimension
+    validate_dimensions_gmlp(hidden_states=x, Wu=Wu, Wg=Wg, bu=bu, bg=bg)
 
     if bu is None:
         HAS_BIAS_UP = False
@@ -273,8 +276,6 @@ def mlp_hidden_states_fwd(
     #     if bg.ndim == 1:
     #         bg = bu[None, :]
 
-    ### validate input dimension
-    validate_dimensions_gmlp(hidden_states=x, Wu=Wu, Wg=Wg, bu=bu, bg=bg)
     M, K = x.shape
     N, _ = Wu.shape
 
@@ -286,34 +287,34 @@ def mlp_hidden_states_fwd(
         min((NUM_SMS, cdiv(M, META["BLOCK_SIZE_M"]) * cdiv(N, META["BLOCK_SIZE_N"]))),
     )
     flatten = maybe_flatten(warp_specialize)
-    # (
-    #     BLOCK_SIZE_M,
-    #     BLOCK_SIZE_N,
-    #     BLOCK_SIZE_K,
-    #     GROUP_SIZE_M,
-    # ) = (
-    #     4,
-    #     4,
-    #     4,
-    #     1,
-    # )
-    # grid = (min((NUM_SMS, cdiv(M, BLOCK_SIZE_M) * cdiv(N, BLOCK_SIZE_N))),)
+    (
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        BLOCK_SIZE_K,
+        GROUP_SIZE_M,
+    ) = (
+        4,
+        4,
+        4,
+        1,
+    )
+    grid = (min((NUM_SMS, cdiv(M, BLOCK_SIZE_M) * cdiv(N, BLOCK_SIZE_N))),)
 
-    ### dropout mask
-    HAS_DROPOUT = True if training and dropout_p > 0.0 else False
-    if HAS_DROPOUT:
-        dropout_mask = (
-            torch.rand_like(x, dtype=x.dtype, device=x.device) > 1 - dropout_p
-        )
-    else:
-        dropout_mask = torch.tensor([[0.0]], dtype=x.dtype, device=x.device)
 
     ###
     # xo = torch.zeros_like(x, dtype=torch.float32, device=x.device)
     xo = torch.zeros((M, N), dtype=x.dtype, device=x.device)
     target_dtype = get_target_dtype(x)
 
-    # print(f"{dropout_p=}")
+    ### dropout mask
+    HAS_DROPOUT = True if training and dropout_p > 0.0 else False
+    if HAS_DROPOUT:
+        dropout_mask = (
+            torch.rand_like(xo, device=x.device)# > dropout_p
+        )
+    else:
+        dropout_mask = torch.tensor([[0.0]], dtype=x.dtype, device=x.device)
+    print(f"{dropout_mask=}")
 
     with torch.cuda.device(x.device):
         _fwd_kernel[grid](
@@ -348,10 +349,13 @@ def mlp_hidden_states_fwd(
             flatten,
             warp_specialize,
             target_dtype,
-            # BLOCK_SIZE_M,
-            # BLOCK_SIZE_N,
-            # BLOCK_SIZE_K,
-            # GROUP_SIZE_M,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
+            BLOCK_SIZE_K,
+            GROUP_SIZE_M,
         )
+
+    # xo[dropout_mask] = 0
+    # xo = xo / (1 - dropout_p)
 
     return xo, dropout_mask  # xo.to(x.dtype) if xo.dtype != x.dtype else xo

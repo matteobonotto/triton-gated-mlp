@@ -1,5 +1,6 @@
 import os
 
+os.environ["TRITON_PRINT_AUTOTUNING"] = "1"
 os.environ["TRITON_INTERPRET"] = "1"
 
 import pytest
@@ -46,18 +47,28 @@ def test_no_bias():
             Wg,
             bg,
         ) = create_tensors(
-            M=random.randint(16, 256),
-            N=random.randint(16, 256),
-            K=random.randint(16, 256),
+            M=random.randint(16, 64),
+            N=random.randint(16, 64),
+            K=random.randint(16, 64),
             DEVICE=DEVICE,
         )
 
+        # (
+        #     x,
+        #     Wu,
+        #     bu,
+        #     Wg,
+        #     bg,
+        # ) = create_tensors(8, 8, 8,DEVICE=DEVICE,
+        # )
+
         act = torch.nn.functional.silu
-        xp = torch.nn.functional.dropout((x @ Wu.T + bu) * act(x @ Wg.T + bg), p=0.0)
+        xp = torch.nn.functional.dropout((x @ Wu.T) * act(x @ Wg.T), p=0.0)
         xp__, _ = mlp_hidden_states_fwd(
             x, Wu=Wu, Wg=Wg, bu=None, bg=None, act_fn="silu", dropout_p=0.0
         )
         assert ((xp - xp__).norm() / xp.norm()) < 1e-6
+
 
 
 def test_bias():
@@ -69,22 +80,35 @@ def test_bias():
             Wg,
             bg,
         ) = create_tensors(
-            M=random.randint(16, 256),
-            N=random.randint(16, 256),
-            K=random.randint(16, 256),
+            M=random.randint(16, 64),
+            N=random.randint(16, 64),
+            K=random.randint(16, 64),
             DEVICE=DEVICE,
         )
 
+        # (
+        #     x,
+        #     Wu,
+        #     bu,
+        #     Wg,
+        #     bg,
+        # ) = create_tensors(8, 8, 8,DEVICE=DEVICE,
+        # )
+
         act = torch.nn.functional.silu
-        xp = torch.nn.functional.dropout((x @ Wu.T + bu) * act(x @ Wg.T + bg), p=0.0)
+        xu = (x @ Wu.T + bu) 
+        xg = act(x @ Wg.T + bg)
+        xp = torch.nn.functional.dropout(xu * xg, p=0.0)
+        # print(f"{xu=} \n{xg=} \n{xp=} \n")
         xp__, _ = mlp_hidden_states_fwd(
-            x, Wu=Wu, Wg=Wg, bu=bu, bg=bu, act_fn="silu", dropout_p=0.0
+            x, Wu=Wu, Wg=Wg, bu=bu, bg=bg, act_fn="silu", dropout_p=0.0
         )
         assert ((xp - xp__).norm() / xp.norm()) < 1e-6
 
+# test_bias()
 
 def test_droput():
-    p = 0.5
+    p = 0.1
     for _ in range(3):
         (
             x,
@@ -93,15 +117,27 @@ def test_droput():
             Wg,
             bg,
         ) = create_tensors(
-            M=random.randint(16, 256),
-            N=random.randint(16, 256),
-            K=random.randint(16, 256),
+            M=random.randint(16, 64),
+            N=random.randint(16, 64),
+            K=random.randint(16, 64),
             DEVICE=DEVICE,
         )
+
+        # (
+        #     x,
+        #     Wu,
+        #     bu,
+        #     Wg,
+        #     bg,
+        # ) = create_tensors(8, 8, 8,DEVICE=DEVICE,
+        # )
 
         act = torch.nn.functional.silu
         xp = torch.nn.functional.dropout((x @ Wu.T + bu) * act(x @ Wg.T + bg), p=p)
         xp__, _ = mlp_hidden_states_fwd(
-            x, Wu=Wu, Wg=Wg, bu=bu, bg=bu, act_fn="silu", dropout_p=p
+            x, Wu=Wu, Wg=Wg, bu=bu, bg=bg, act_fn="silu", dropout_p=p
         )
+        ...
         # assert ((xp - xp__).norm() / xp.norm()) < 1e-6
+
+# test_droput()

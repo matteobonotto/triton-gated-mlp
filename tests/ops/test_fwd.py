@@ -70,7 +70,6 @@ def test_no_bias():
         assert ((xp - xp__).norm() / xp.norm()) < 1e-6
 
 
-
 def test_bias():
     for _ in range(3):
         (
@@ -96,7 +95,7 @@ def test_bias():
         # )
 
         act = torch.nn.functional.silu
-        xu = (x @ Wu.T + bu) 
+        xu = x @ Wu.T + bu
         xg = act(x @ Wg.T + bg)
         xp = torch.nn.functional.dropout(xu * xg, p=0.0)
         # print(f"{xu=} \n{xg=} \n{xp=} \n")
@@ -105,7 +104,9 @@ def test_bias():
         )
         assert ((xp - xp__).norm() / xp.norm()) < 1e-6
 
+
 # test_bias()
+
 
 def test_droput():
     p = 0.1
@@ -139,5 +140,6 @@ def test_droput():
         )
         ...
         # assert ((xp - xp__).norm() / xp.norm()) < 1e-6
+
 
 # test_droput()

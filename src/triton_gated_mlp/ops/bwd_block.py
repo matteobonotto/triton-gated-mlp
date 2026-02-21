@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 import triton
 import triton.language as tl
-from typing import Optional
+from typing import Optional, Tuple
 
 from .utils import (
     validate_dimensions_gmlp,
@@ -21,6 +21,19 @@ def is_at_least_hopper() -> bool:
 
 def maybe_flatten(warp_specialize: bool) -> bool:
     return False if (warp_specialize and is_at_least_hopper()) else True
+
+
+def initialize_outputs(
+    x: Tensor, Wu: Tensor, Wg: Tensor, bu: Tensor, bg: Tensor
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    device = x.device
+    dtype = x.dtype
+    dx = torch.empty_like(x, dtype=dtype, device=device)
+    dWu = torch.empty_like(Wu, dtype=dtype, device=device)
+    dbu = torch.empty_like(bu, dtype=dtype, device=device)
+    dWg = torch.empty_like(Wg, dtype=dtype, device=device)
+    dbg = torch.empty_like(bu, dtype=dtype, device=device)
+    return dx, dWu, dbu, dWg, dbg
 
 
 def prune_invalid_configs(configs, named_args, **kwargs):
@@ -107,7 +120,7 @@ def map_dtype(target_dtype):
 #     restore_value=["xo_ptr", "d_mask_ptr"]
 # )
 @triton.jit()
-def _fwd_kernel(
+def _bwd_dx_kernel(
     x_ptr,
     Wu_ptr,
     Wg_ptr,
@@ -238,12 +251,17 @@ def _fwd_kernel(
         tl.store(tile_xo, value=tile_o, mask=mask_o)
 
 
+@triton.jit()
+def _bwd_dW_db_kernel(): ...
+
+
 @torch.no_grad()
-def mlp_hidden_states_fwd(
+def mlp_hidden_states_bwd(
     x: Tensor,
     Wu: Tensor,  # this one is transposed
     Wg: Tensor,  # this one is transposed
     act_fn: str,
+    dropout_mask: Tensor,
     bg: Tensor | None = None,
     bu: Tensor | None = None,
     dropout_p: float = 0.0,
@@ -252,29 +270,17 @@ def mlp_hidden_states_fwd(
     HAS_BIAS_UP: bool = True,
     HAS_BIAS_GP: bool = True,
 ) -> Tensor:
-    """
-    This function computes the follwing operations in a fused fashion:
-
-        self.dropout(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-
-    Wieghts WT_up and WT_gp are kept transposed, and they are transposed back inside the
-    triton kernel when doing tl.dot(x, W.T, ...)
-    """
     ### validate input dimension
-    validate_dimensions_gmlp(hidden_states=x, Wu=Wu, Wg=Wg, bu=bu, bg=bg)
+    validate_dimensions_gmlp(
+        hidden_states=x, Wu=Wu, Wg=Wg, bu=bu, bg=bg, dropout_mask=dropout_mask
+    )
 
     if bu is None:
         HAS_BIAS_UP = False
         bu = torch.tensor([[0]], dtype=x.dtype, device=x.device)
-    # else:
-    #     if bu.ndim == 1:
-    #         bu = bu[None, :]
     if bg is None:
         HAS_BIAS_GP = False
         bg = torch.tensor([[0]], dtype=x.dtype, device=x.device)
-    # else:
-    #     if bg.ndim == 1:
-    #         bg = bu[None, :]
 
     M, K = x.shape
     N, _ = Wu.shape
@@ -301,42 +307,17 @@ def mlp_hidden_states_fwd(
     grid = (min((NUM_SMS, cdiv(M, BLOCK_SIZE_M) * cdiv(N, BLOCK_SIZE_N))),)
 
     ###
+    # xo = torch.zeros_like(x, dtype=torch.float32, device=x.device)
+    dx, dWu, dbu, dWg, dbg = initialize_outputs(x=x, Wu=Wu, Wg=Wg, bu=bu, bg=bg)
     xo = torch.zeros((M, N), dtype=x.dtype, device=x.device)
     target_dtype = get_target_dtype(x)
 
     ### dropout mask
     HAS_DROPOUT = True if training and dropout_p > 0.0 else False
-    if HAS_DROPOUT:
-        dropout_mask = torch.rand_like(xo, device=x.device)  # > dropout_p
-    else:
-        dropout_mask = torch.tensor([[0.0]], dtype=x.dtype, device=x.device)
 
+    ### dx
     with torch.cuda.device(x.device):
-        _fwd_kernel[grid](
-            x,
-            Wu,
-            Wg,
-            bu,
-            bg,
-            xo,
-            x.stride(0),
-            x.stride(1),
-            Wu.stride(0),
-            Wu.stride(1),
-            Wg.stride(0),
-            Wg.stride(1),
-            HAS_BIAS_UP,
-            HAS_BIAS_GP,
-            bu.stride(0),
-            bg.stride(0),
-            xo.stride(0),
-            xo.stride(1),
-            act_fn,
-            HAS_DROPOUT,
-            dropout_p,
-            dropout_mask,
-            dropout_mask.stride(0),
-            dropout_mask.stride(1),
+        _bwd_dx_kernel(
             M,
             N,
             K,
@@ -350,7 +331,78 @@ def mlp_hidden_states_fwd(
             GROUP_SIZE_M,
         )
 
+    ### dWu, dbu
+    with torch.cuda.device(x.device):
+        _bwd_dW_db_kernel(
+            M,
+            N,
+            K,
+            NUM_SMS,
+            flatten,
+            warp_specialize,
+            target_dtype,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
+            BLOCK_SIZE_K,
+            GROUP_SIZE_M,
+        )
+
+    ### dWg, dbg
+    with torch.cuda.device(x.device):
+        _bwd_dW_db_kernel(
+            M,
+            N,
+            K,
+            NUM_SMS,
+            flatten,
+            warp_specialize,
+            target_dtype,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
+            BLOCK_SIZE_K,
+            GROUP_SIZE_M,
+        )
+
+    # with torch.cuda.device(x.device):
+    #     _fwd_kernel[grid](
+    #         x,
+    #         Wu,
+    #         Wg,
+    #         bu,
+    #         bg,
+    #         xo,
+    #         x.stride(0),
+    #         x.stride(1),
+    #         Wu.stride(0),
+    #         Wu.stride(1),
+    #         Wg.stride(0),
+    #         Wg.stride(1),
+    #         HAS_BIAS_UP,
+    #         HAS_BIAS_GP,
+    #         bu.stride(0),
+    #         bg.stride(0),
+    #         xo.stride(0),
+    #         xo.stride(1),
+    #         act_fn,
+    #         HAS_DROPOUT,
+    #         dropout_p,
+    #         dropout_mask,
+    #         dropout_mask.stride(0),
+    #         dropout_mask.stride(1),
+    #         M,
+    #         N,
+    #         K,
+    #         NUM_SMS,
+    #         flatten,
+    #         warp_specialize,
+    #         target_dtype,
+    #         BLOCK_SIZE_M,
+    #         BLOCK_SIZE_N,
+    #         BLOCK_SIZE_K,
+    #         GROUP_SIZE_M,
+    #     )
+
     # xo[dropout_mask] = 0
     # xo = xo / (1 - dropout_p)
 
-    return xo, dropout_mask  # xo.to(x.dtype) if xo.dtype != x.dtype else xo
+    return dx, dWu, dbu if HAS_BIAS_UP el, dbg if HAS_BIAS_GP else None

@@ -51,10 +51,11 @@ def validate_dimensions_gmlp(
     hidden_states: Tensor,
     Wu: Tensor,  # this one is transposed
     Wg: Tensor,  # this one is transposed
-    bu: Tensor | None = None,
-    bg: Tensor | None = None,
-    Wo: Tensor | None = None,  # this one is transposed
-    bo: Tensor | None = None,
+    bu: Optional[Tensor] = None,
+    bg: Optional[Tensor] = None,
+    Wo: Optional[Tensor] = None,  # this one is transposed
+    bo: Optional[Tensor] = None,
+    dropout_mask: Optional[Tensor] = None,
 ) -> None:
     assert (
         hidden_states.ndim <= 2
@@ -74,6 +75,14 @@ def validate_dimensions_gmlp(
 
     if bo is not None:
         assert bo.shape[0] == Wo.shape[0], "dimension mismatch in bo"
+
+    if dropout_mask is not None:
+        assert (
+            dropout_mask.shape[0] == hidden_states.shape[0]
+        ), "dimension mismatch in dropout_mask.shape[0]"
+        assert (
+            dropout_mask.shape[1] == Wg.shape[0]
+        ), "dimension mismatch in dropout_mask.shape[1]"
 
 
 def pad_tensor_16_byte_aligned(t: Tensor, axis: int) -> Tensor:
